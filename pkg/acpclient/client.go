@@ -13,6 +13,7 @@ import (
 	"github.com/mcpchecker/mcpchecker/pkg/mcpclient"
 	"github.com/mcpchecker/mcpchecker/pkg/mcpproxy"
 	"github.com/mcpchecker/mcpchecker/pkg/tokens"
+	"github.com/mcpchecker/mcpchecker/pkg/util"
 )
 
 // RunResult contains the results of running a prompt, including session updates
@@ -33,19 +34,26 @@ type Client interface {
 	Close(ctx context.Context) error
 }
 
-func NewClient(ctx context.Context, cfg *AcpConfig) Client {
+func NewClient(ctx context.Context, cfg *AcpConfig, opts ...ClientOption) Client {
+	var o clientOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	return &client{
 		cfg:      cfg,
+		skills:   o.skills,
 		sessions: make(map[acp.SessionId]*session),
 	}
 }
 
 type client struct {
 	cfg      *AcpConfig
+	skills   SkillInfo
 	mu       sync.RWMutex
 	cmd      *exec.Cmd
 	conn     *acp.ClientSideConnection
 	sessions map[acp.SessionId]*session
+	cwd      string // working directory for the current run, used by ReadTextFile
 }
 
 func (c *client) Start(ctx context.Context) error {
@@ -56,10 +64,11 @@ func (c *client) Start(ctx context.Context) error {
 
 	c.conn = acp.NewClientSideConnection(c, stdin, stdout)
 
+	enableReadFile := c.skills != nil && len(c.skills.GetSourceDirs()) > 0
 	initResp, err := c.conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		ClientCapabilities: acp.ClientCapabilities{
-			Fs:       acp.FileSystemCapabilities{ReadTextFile: false, WriteTextFile: false},
+			Fs:       acp.FileSystemCapabilities{ReadTextFile: enableReadFile, WriteTextFile: false},
 			Terminal: false,
 		},
 	})
@@ -113,29 +122,43 @@ func (c *client) run(ctx context.Context, prompt string, servers mcpproxy.Server
 	}
 
 	defer func() {
+		c.cwd = ""
 		_ = os.RemoveAll(tmpDir)
 	}()
 
-	mcpServers := make([]acp.McpServer, 0, len(servers.GetMcpServers()))
-	for _, srv := range servers.GetMcpServers() {
-		cfg, err := srv.GetConfig()
-		if err != nil {
-			return nil, acp.PromptResponse{}, fmt.Errorf("failed to get config for mcp server %q: %w", srv.GetName(), err)
-		}
+	// Store cwd for ReadTextFile callback
+	c.cwd = tmpDir
 
-		headers := make([]acp.HttpHeader, 0, len(cfg.Headers))
-		for k, v := range cfg.Headers {
-			headers = append(headers, acp.HttpHeader{Name: k, Value: v})
+	// Mount skills into the temp directory if configured
+	if c.skills != nil {
+		if err := util.MountSkills(tmpDir, c.skills.GetMountPath(), c.skills.GetSourceDirs()); err != nil {
+			return nil, acp.PromptResponse{}, fmt.Errorf("failed to mount skills: %w", err)
 		}
+	}
 
-		mcpServers = append(mcpServers, acp.McpServer{
-			Http: &acp.McpServerHttpInline{
-				Name:    srv.GetName(),
-				Url:     cfg.URL,
-				Type:    mcpclient.TransportTypeHttp,
-				Headers: headers,
-			},
-		})
+	var mcpServers []acp.McpServer
+	if servers != nil {
+		mcpServers = make([]acp.McpServer, 0, len(servers.GetMcpServers()))
+		for _, srv := range servers.GetMcpServers() {
+			cfg, err := srv.GetConfig()
+			if err != nil {
+				return nil, acp.PromptResponse{}, fmt.Errorf("failed to get config for mcp server %q: %w", srv.GetName(), err)
+			}
+
+			headers := make([]acp.HttpHeader, 0, len(cfg.Headers))
+			for k, v := range cfg.Headers {
+				headers = append(headers, acp.HttpHeader{Name: k, Value: v})
+			}
+
+			mcpServers = append(mcpServers, acp.McpServer{
+				Http: &acp.McpServerHttpInline{
+					Name:    srv.GetName(),
+					Url:     cfg.URL,
+					Type:    mcpclient.TransportTypeHttp,
+					Headers: headers,
+				},
+			})
+		}
 	}
 
 	session, err := c.conn.NewSession(ctx, acp.NewSessionRequest{

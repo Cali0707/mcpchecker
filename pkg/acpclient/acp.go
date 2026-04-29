@@ -3,6 +3,9 @@ package acpclient
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/coder/acp-go-sdk"
 )
@@ -101,7 +104,45 @@ func (c *client) SessionUpdate(ctx context.Context, params acp.SessionNotificati
 //
 // Only available if the client supports the 'fs.readTextFile' capability.
 func (c *client) ReadTextFile(ctx context.Context, params acp.ReadTextFileRequest) (acp.ReadTextFileResponse, error) {
-	return acp.ReadTextFileResponse{}, fmt.Errorf("no fs.readTextFile capability")
+	if c.cwd == "" {
+		return acp.ReadTextFileResponse{}, fmt.Errorf("no fs.readTextFile capability")
+	}
+
+	if !filepath.IsAbs(params.Path) {
+		return acp.ReadTextFileResponse{}, fmt.Errorf("path must be absolute: %s", params.Path)
+	}
+
+	// Security: scope reads to the agent's working directory
+	cleanPath := filepath.Clean(params.Path)
+	cwdPrefix := filepath.Clean(c.cwd) + string(filepath.Separator)
+	if !strings.HasPrefix(cleanPath, cwdPrefix) && cleanPath != filepath.Clean(c.cwd) {
+		return acp.ReadTextFileResponse{}, fmt.Errorf("path %q is outside the agent working directory", params.Path)
+	}
+
+	b, err := os.ReadFile(cleanPath)
+	if err != nil {
+		return acp.ReadTextFileResponse{}, fmt.Errorf("read %s: %w", params.Path, err)
+	}
+
+	content := string(b)
+
+	// Apply optional line/limit (1-based line index)
+	if params.Line != nil || params.Limit != nil {
+		lines := strings.Split(content, "\n")
+		start := 0
+		if params.Line != nil && *params.Line > 0 {
+			start = min(max(*params.Line-1, 0), len(lines))
+		}
+		end := len(lines)
+		if params.Limit != nil && *params.Limit > 0 {
+			if start+*params.Limit < end {
+				end = start + *params.Limit
+			}
+		}
+		content = strings.Join(lines[start:end], "\n")
+	}
+
+	return acp.ReadTextFileResponse{Content: content}, nil
 }
 
 // Request to write content to a text file.
