@@ -119,6 +119,18 @@ func TestLLMAgent(t *testing.T) {
 	})
 }
 
+func TestResolveLLMAgentResponsesAPI(t *testing.T) {
+	spec, err := ResolveAgentRef(&AgentRef{
+		Type:            "builtin.llm-agent",
+		Model:           "openai:gpt-5.6-luna",
+		UseResponsesAPI: new(false),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, spec.Builtin)
+	require.NotNil(t, spec.Builtin.UseResponsesAPI)
+	assert.False(t, *spec.Builtin.UseResponsesAPI)
+}
+
 func TestClaudeCodeAgent(t *testing.T) {
 	agent := &ClaudeCodeAgent{}
 

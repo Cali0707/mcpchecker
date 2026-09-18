@@ -43,6 +43,9 @@ func ResolveAgentRef(ref *AgentRef) (*AgentSpec, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get defaults for builtin agent %q: %w", builtinType, err)
 	}
+	if agentSpec.Builtin != nil {
+		agentSpec.Builtin.UseResponsesAPI = ref.UseResponsesAPI
+	}
 
 	return agentSpec, nil
 }

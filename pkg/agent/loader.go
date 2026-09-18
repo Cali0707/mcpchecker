@@ -67,6 +67,9 @@ func mergeAgentSpecs(defaults, overrides *AgentSpec) *AgentSpec {
 			if overrides.Builtin.Model != "" {
 				result.Builtin.Model = overrides.Builtin.Model
 			}
+			if overrides.Builtin.UseResponsesAPI != nil {
+				result.Builtin.UseResponsesAPI = overrides.Builtin.UseResponsesAPI
+			}
 			if overrides.Builtin.BaseURL != "" {
 				result.Builtin.BaseURL = overrides.Builtin.BaseURL
 			}
