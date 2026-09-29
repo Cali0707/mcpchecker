@@ -186,6 +186,7 @@ func (p *openaiProviderBuilder) Build(opt providerOpt) (fantasy.Provider, error)
 	}
 
 	opts = append(opts,
+		openai.WithUseResponsesAPI(),
 		openai.WithResponsesAPIFunc(func(modelID string) bool {
 			return shouldUseResponsesAPI(modelID, opt.openai.useResponsesApi, baseUrl != "")
 		}),
