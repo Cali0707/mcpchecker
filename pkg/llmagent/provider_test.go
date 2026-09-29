@@ -288,39 +288,35 @@ func TestShouldUseResponsesAPI(t *testing.T) {
 		configured *bool
 		expected   bool
 	}{
-		"listed alias defaults to responses": {
-			model:    "gpt-5.6",
+		"gpt-5 defaults to responses": {
+			model: "gpt-5",
 			expected: true,
 		},
-		"listed sol defaults to responses": {
-			model:    "gpt-5.6-sol",
+		"gpt-4 defaults to responses": {
+			model: "gpt-4",
 			expected: true,
 		},
-		"listed terra defaults to responses": {
-			model:    "gpt-5.6-terra",
+		"gpt-5.X model defaults to responses": {
+			model: "gpt-5.6-luna",
 			expected: true,
 		},
-		"listed luna defaults to responses": {
-			model:    "gpt-5.6-luna",
-			expected: true,
-		},
-		"unlisted model defaults to chat completions": {
-			model:    "gpt-5.5",
+		"gpt-3 does not default to responses": {
+			model: "gpt-3",
 			expected: false,
 		},
-		"similar model is not implicitly included": {
-			model:    "gpt-5.6-custom",
+		"non gpt model does not default to responses": {
+			model: "claude-sonnet-5.0",
 			expected: false,
 		},
-		"explicit enable overrides unlisted model": {
-			model:      "gpt-4o",
-			configured: new(true),
-			expected:   true,
-		},
-		"explicit disable overrides listed model": {
-			model:      "gpt-5.6-luna",
+		"gpt-5 can be overriden to no responses": {
+			model: "gpt-5",
 			configured: new(false),
-			expected:   false,
+			expected: false,
+		},
+		"non gpt model can be overriden to responses": {
+			model: "claude-sonnet-5.0",
+			configured: new(true),
+			expected: true,
 		},
 	}
 

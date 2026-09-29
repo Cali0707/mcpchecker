@@ -3,7 +3,6 @@ package llmagent
 import (
 	"fmt"
 	"os"
-	"slices"
 	"sort"
 
 	"charm.land/fantasy"
@@ -29,13 +28,6 @@ const (
 	openaiApiKeyEnvVar        = "OPENAI_API_KEY"
 	openaiBaseUrlEnvVar       = "OPENAI_BASE_URL"
 )
-
-var responsesAPIModels = []string{
-	"gpt-5.6",
-	"gpt-5.6-sol",
-	"gpt-5.6-terra",
-	"gpt-5.6-luna",
-}
 
 func ResolveProvider(providerName string) (fantasy.Provider, error) {
 	def, ok := providerBuilders[providerName]
@@ -198,5 +190,5 @@ func shouldUseResponsesAPI(modelID string, configured *bool) bool {
 	if configured != nil {
 		return *configured
 	}
-	return slices.Contains(responsesAPIModels, modelID)
+	return openai.IsResponsesModel(modelID)
 }
