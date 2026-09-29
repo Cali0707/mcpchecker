@@ -29,7 +29,12 @@ const (
 	openaiBaseUrlEnvVar       = "OPENAI_BASE_URL"
 )
 
-func ResolveProvider(providerName string) (fantasy.Provider, error) {
+func ResolveProvider(providerName string, opts ...ProviderOpt) (fantasy.Provider, error) {
+	providerOpts := &providerOpt{}
+	for _, opt := range opts {
+		opt(providerOpts)
+	}
+
 	def, ok := providerBuilders[providerName]
 	if !ok {
 		supported := make([]string, 0, len(providerBuilders))
@@ -41,20 +46,28 @@ func ResolveProvider(providerName string) (fantasy.Provider, error) {
 		return nil, fmt.Errorf("unsupported provider %q, supported: %v", providerName, supported)
 	}
 
-	return def.Build()
+	return def.Build(*providerOpts)
 }
 
-func resolveProvider(providerName string, useResponsesAPI *bool) (fantasy.Provider, error) {
-	if providerName == openaiProviderKey {
-		return (&openaiProviderBuilder{}).build(useResponsesAPI)
-	}
+type ProviderOpt func(*providerOpt)
 
-	return ResolveProvider(providerName)
+type providerOpt struct {
+	openai openaiProviderOpts
+}
+
+type openaiProviderOpts struct {
+	useResponsesApi *bool
+}
+
+func WithUsesResponseApi(b *bool) ProviderOpt {
+	return func(po *providerOpt) {
+		po.openai.useResponsesApi = b
+	}
 }
 
 // providerBuilder knows how to create a fantasy.Provider from env vars
 type providerBuilder interface {
-	Build() (fantasy.Provider, error)
+	Build(providerOpt) (fantasy.Provider, error)
 }
 
 var providerBuilders = map[string]providerBuilder{
@@ -66,7 +79,7 @@ var providerBuilders = map[string]providerBuilder{
 
 type anthropicProviderBuilder struct{}
 
-func (p *anthropicProviderBuilder) Build() (fantasy.Provider, error) {
+func (p *anthropicProviderBuilder) Build(_ providerOpt) (fantasy.Provider, error) {
 	opts := []anthropic.Option{}
 
 	useVertex := os.Getenv(anthropicUseVertexEnvVar)
@@ -108,7 +121,7 @@ type googleProviderBuilder struct {
 	providerName string
 }
 
-func (p *googleProviderBuilder) Build() (fantasy.Provider, error) {
+func (p *googleProviderBuilder) Build(_ providerOpt) (fantasy.Provider, error) {
 	opts := []google.Option{}
 
 	useVertex := os.Getenv(geminiUseVertexEnvVar) == "1" || os.Getenv(googleUseVertexEnvVar) == "1"
@@ -159,11 +172,7 @@ func (p *googleProviderBuilder) Build() (fantasy.Provider, error) {
 
 type openaiProviderBuilder struct{}
 
-func (p *openaiProviderBuilder) Build() (fantasy.Provider, error) {
-	return p.build(nil)
-}
-
-func (p *openaiProviderBuilder) build(useResponsesAPI *bool) (fantasy.Provider, error) {
+func (p *openaiProviderBuilder) Build(opt providerOpt) (fantasy.Provider, error) {
 	opts := []openai.Option{}
 
 	key := os.Getenv(openaiApiKeyEnvVar)
@@ -177,18 +186,18 @@ func (p *openaiProviderBuilder) build(useResponsesAPI *bool) (fantasy.Provider, 
 	}
 
 	opts = append(opts,
-		openai.WithUseResponsesAPI(),
 		openai.WithResponsesAPIFunc(func(modelID string) bool {
-			return shouldUseResponsesAPI(modelID, useResponsesAPI)
+			return shouldUseResponsesAPI(modelID, opt.openai.useResponsesApi, baseUrl != "")
 		}),
 	)
 
 	return openai.New(opts...)
 }
 
-func shouldUseResponsesAPI(modelID string, configured *bool) bool {
+func shouldUseResponsesAPI(modelID string, configured *bool, overridesBaseUrl bool) bool {
 	if configured != nil {
 		return *configured
 	}
-	return openai.IsResponsesModel(modelID)
+	// if base url is overriden, it is likely not going to support openai specific resposnes api
+	return !overridesBaseUrl && openai.IsResponsesModel(modelID)
 }

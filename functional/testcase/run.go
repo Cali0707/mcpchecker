@@ -18,7 +18,7 @@ import (
 // Environment variables for binary paths
 const (
 	EnvMcpCheckerBinary = "MCPCHECKER_BINARY"
-	EnvMockAgentBinary = "MOCK_AGENT_BINARY"
+	EnvMockAgentBinary  = "MOCK_AGENT_BINARY"
 )
 
 // Runner orchestrates the execution of a test case
@@ -294,6 +294,7 @@ func (r *Runner) runMcpChecker(ctx context.Context) *RunContext {
 		cmd.Env = append(cmd.Env, "E2E_OPENAI_BASE_URL="+r.judgeServer.URL())
 		cmd.Env = append(cmd.Env, "E2E_OPENAI_API_KEY=sk-mock-key")
 		cmd.Env = append(cmd.Env, "E2E_OPENAI_MODEL=gpt-4")
+		cmd.Env = append(cmd.Env, "OPENAI_BASE_URL="+r.judgeServer.URL())
 	}
 
 	// Run command
@@ -352,12 +353,12 @@ func GetMcpCheckerBinary() (string, error) {
 	}
 
 	candidates := []string{
-		filepath.Join(wd, "..", "..", "bin", "mcpchecker"),    // from functional/testcase or functional/tests
-		filepath.Join(wd, "..", "bin", "mcpchecker"),          // from functional
-		filepath.Join(wd, "bin", "mcpchecker"),                // current dir
-		filepath.Join(wd, "..", "..", "mcpchecker"),           // repo root
-		filepath.Join(wd, "..", "mcpchecker"),                 // parent
-		filepath.Join(wd, "mcpchecker"),                       // current dir
+		filepath.Join(wd, "..", "..", "bin", "mcpchecker"), // from functional/testcase or functional/tests
+		filepath.Join(wd, "..", "bin", "mcpchecker"),       // from functional
+		filepath.Join(wd, "bin", "mcpchecker"),             // current dir
+		filepath.Join(wd, "..", "..", "mcpchecker"),        // repo root
+		filepath.Join(wd, "..", "mcpchecker"),              // parent
+		filepath.Join(wd, "mcpchecker"),                    // current dir
 	}
 
 	for _, candidate := range candidates {
@@ -388,12 +389,12 @@ func GetMockAgentBinary() (string, error) {
 	}
 
 	candidates := []string{
-		filepath.Join(wd, "..", "..", "bin", "mock-agent"),    // from functional/testcase or functional/tests
-		filepath.Join(wd, "..", "bin", "mock-agent"),          // from functional
-		filepath.Join(wd, "bin", "mock-agent"),                // current dir
-		filepath.Join(wd, "..", "..", "mock-agent"),           // repo root
-		filepath.Join(wd, "..", "mock-agent"),                 // parent
-		filepath.Join(wd, "mock-agent"),                       // current dir
+		filepath.Join(wd, "..", "..", "bin", "mock-agent"), // from functional/testcase or functional/tests
+		filepath.Join(wd, "..", "bin", "mock-agent"),       // from functional
+		filepath.Join(wd, "bin", "mock-agent"),             // current dir
+		filepath.Join(wd, "..", "..", "mock-agent"),        // repo root
+		filepath.Join(wd, "..", "mock-agent"),              // parent
+		filepath.Join(wd, "mock-agent"),                    // current dir
 	}
 
 	for _, candidate := range candidates {

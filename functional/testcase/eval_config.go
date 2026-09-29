@@ -127,6 +127,11 @@ func (b *AgentRefBuilder) Model(m string) *AgentRefBuilder {
 	return b
 }
 
+func (b *AgentRefBuilder) UseRseponsesApi(t *bool) *AgentRefBuilder {
+	b.ref.UseResponsesAPI = t
+	return b
+}
+
 // LLMJudgeConfigBuilder builds LLM judge configuration.
 // The LLM judge config uses environment variable keys, not direct values.
 // Use the Env* methods to set the environment variable key names.
@@ -158,6 +163,13 @@ func (b *LLMJudgeConfigBuilder) EnvModelKey(key string) *LLMJudgeConfigBuilder {
 		b.config.Env = &llmjudge.LLMJudgeEnvConfig{}
 	}
 	b.config.Env.ModelNameKey = key
+	return b
+}
+
+func (b *LLMJudgeConfigBuilder) Agent(builder func(*AgentRefBuilder)) *LLMJudgeConfigBuilder {
+	agentRef := &AgentRefBuilder{ref: &AgentRef{}}
+	builder(agentRef)
+	b.config.AgentRef = agentRef.ref
 	return b
 }
 

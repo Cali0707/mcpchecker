@@ -37,6 +37,13 @@ func TestTaskPassesWithToolCallAndJudge(t *testing.T) {
 		}).
 		WithEval(func(eval *testcase.EvalConfig) {
 			eval.Name("test-eval")
+			eval.LLMJudge(func(judge *testcase.LLMJudgeConfigBuilder) {
+				judge.Agent(func(agent *testcase.AgentRefBuilder) {
+					agent.Type("builtin.llm-agent").
+						Model("openai:gpt-5").
+						UseRseponsesApi(new(false))
+				})
+			})
 		}).
 		WithJudge(func(j *testcase.JudgeBuilder) {
 			j.Always().Pass("The output correctly describes creation of the nginx-web pod")
@@ -78,6 +85,13 @@ func TestTaskPassesWithScriptVerification(t *testing.T) {
 		}).
 		WithEval(func(eval *testcase.EvalConfig) {
 			eval.Name("test-eval-script")
+			eval.LLMJudge(func(judge *testcase.LLMJudgeConfigBuilder) {
+				judge.Agent(func(agent *testcase.AgentRefBuilder) {
+					agent.Type("builtin.llm-agent").
+						Model("openai:gpt-5").
+						UseRseponsesApi(new(false))
+				})
+			})
 		}).
 		ExpectTaskPassed().
 		ExpectToolCalled("filesystem", "write_file").
@@ -96,11 +110,11 @@ func TestTaskPassesWithMultipleToolCalls(t *testing.T) {
 					WithStringParam("resource", "Resource type", true).
 					ReturnsText("NAME      READY   STATUS    RESTARTS   AGE\nnginx     1/1     Running   0          5m")
 			}).
-			Tool("kubectl_apply", func(tool *testcase.ToolDef) {
-				tool.WithDescription("Apply a Kubernetes manifest").
-					WithStringParam("manifest", "YAML manifest content", true).
-					ReturnsText("service/nginx-svc created")
-			})
+				Tool("kubectl_apply", func(tool *testcase.ToolDef) {
+					tool.WithDescription("Apply a Kubernetes manifest").
+						WithStringParam("manifest", "YAML manifest content", true).
+						ReturnsText("service/nginx-svc created")
+				})
 		}).
 		WithAgent(func(a *testcase.AgentBuilder) {
 			a.OnPromptContaining("expose").
@@ -120,6 +134,13 @@ func TestTaskPassesWithMultipleToolCalls(t *testing.T) {
 		}).
 		WithEval(func(eval *testcase.EvalConfig) {
 			eval.Name("test-eval-multi-tool")
+			eval.LLMJudge(func(judge *testcase.LLMJudgeConfigBuilder) {
+				judge.Agent(func(agent *testcase.AgentRefBuilder) {
+					agent.Type("builtin.llm-agent").
+						Model("openai:gpt-5").
+						UseRseponsesApi(new(false))
+				})
+			})
 		}).
 		WithJudge(func(j *testcase.JudgeBuilder) {
 			j.Always().Pass("Agent correctly found the pod and created a service")
@@ -158,6 +179,13 @@ func TestTaskWithLabels(t *testing.T) {
 		}).
 		WithEval(func(eval *testcase.EvalConfig) {
 			eval.Name("test-task-with-labels")
+			eval.LLMJudge(func(judge *testcase.LLMJudgeConfigBuilder) {
+				judge.Agent(func(agent *testcase.AgentRefBuilder) {
+					agent.Type("builtin.llm-agent").
+						Model("openai:gpt-5").
+						UseRseponsesApi(new(false))
+				})
+			})
 		}).
 		WithJudge(func(j *testcase.JudgeBuilder) {
 			j.Always().Pass("Version check completed")
@@ -166,4 +194,3 @@ func TestTaskWithLabels(t *testing.T) {
 		ExpectToolCalled("kubernetes", "kubectl_version").
 		Run()
 }
-
