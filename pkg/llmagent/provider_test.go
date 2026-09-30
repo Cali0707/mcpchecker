@@ -125,7 +125,7 @@ func TestAnthropicProviderBuilder(t *testing.T) {
 			tc.setupEnv()
 
 			builder := &anthropicProviderBuilder{}
-			provider, err := builder.Build()
+			provider, err := builder.Build(providerOpt{})
 
 			if tc.expectErr {
 				require.Error(t, err)
@@ -228,7 +228,7 @@ func TestGoogleProviderBuilder(t *testing.T) {
 			tc.setupEnv()
 
 			builder := &googleProviderBuilder{providerName: googleProviderKey}
-			provider, err := builder.Build()
+			provider, err := builder.Build(providerOpt{})
 
 			if tc.expectErr {
 				require.Error(t, err)
@@ -274,10 +274,61 @@ func TestOpenAIProviderBuilder(t *testing.T) {
 			tc.setupEnv()
 
 			builder := &openaiProviderBuilder{}
-			provider, err := builder.Build()
+			provider, err := builder.Build(providerOpt{})
 
 			require.NoError(t, err)
 			assert.NotNil(t, provider)
+		})
+	}
+}
+
+func TestShouldUseResponsesAPI(t *testing.T) {
+	tests := map[string]struct {
+		model            string
+		configured       *bool
+		expected         bool
+		baseUrlOverriden bool
+	}{
+		"gpt-5 defaults to responses": {
+			model:    "gpt-5",
+			expected: true,
+		},
+		"gpt-4 defaults to responses": {
+			model:    "gpt-4",
+			expected: true,
+		},
+		"gpt-5.X model defaults to responses": {
+			model:    "gpt-5.6-luna",
+			expected: true,
+		},
+		"gpt-3 does not default to responses": {
+			model:    "gpt-3",
+			expected: false,
+		},
+		"non gpt model does not default to responses": {
+			model:    "claude-sonnet-5.0",
+			expected: false,
+		},
+		"gpt-5 can be overriden to no responses": {
+			model:      "gpt-5",
+			configured: new(false),
+			expected:   false,
+		},
+		"non gpt model can be overriden to responses": {
+			model:      "claude-sonnet-5.0",
+			configured: new(true),
+			expected:   true,
+		},
+		"gpt-4 defaults to no responses when base url overriden": {
+			model: "gpt-4",
+			baseUrlOverriden: true,
+			expected: false,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, shouldUseResponsesAPI(tc.model, tc.configured, tc.baseUrlOverriden))
 		})
 	}
 }
