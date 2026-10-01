@@ -19,6 +19,7 @@ type Stats struct {
 	TaskPassRate      float64 `json:"taskPassRate"`
 	AssertionsTotal   int     `json:"assertionsTotal"`
 	AssertionsPassed  int     `json:"assertionsPassed"`
+	AssertionsSkipped int     `json:"assertionsSkipped,omitempty"`
 	AssertionPassRate float64 `json:"assertionPassRate"`
 	TotalTokens       int64   `json:"totalTokens"`
 	McpSchemaTokens   int64   `json:"mcpSchemaTokens"`
@@ -108,6 +109,7 @@ func CalculateStats(resultsFile string, results []*eval.EvalResult) Stats {
 		if result.AssertionResults != nil {
 			stats.AssertionsTotal += result.AssertionResults.TotalAssertions()
 			stats.AssertionsPassed += result.AssertionResults.PassedAssertions()
+			stats.AssertionsSkipped += result.AssertionResults.SkippedCount()
 		}
 
 		if result.TokenEstimate != nil {
@@ -186,6 +188,9 @@ func FailureReason(r *eval.EvalResult) string {
 	if a.NoDuplicateCalls != nil && !a.NoDuplicateCalls.Passed {
 		return a.NoDuplicateCalls.Reason
 	}
+	if len(a.PresenceFailures) > 0 {
+		return formatPresenceFailure(a.PresenceFailures[0])
+	}
 	return ""
 }
 
@@ -210,6 +215,23 @@ func CollectFailedAssertions(results *eval.CompositeAssertionResult) []string {
 	addFailure("PromptsNotUsed", results.PromptsNotUsed)
 	addFailure("CallOrder", results.CallOrder)
 	addFailure("NoDuplicateCalls", results.NoDuplicateCalls)
+	for _, failure := range results.PresenceFailures {
+		failures = append(failures, formatPresenceFailure(failure))
+	}
 
 	return failures
+}
+
+func formatPresenceFailure(failure eval.AssertionPresenceResult) string {
+	location := failure.Server
+	if failure.Target != "" {
+		if location != "" {
+			location += "/"
+		}
+		location += failure.Target
+	}
+	if location == "" {
+		return fmt.Sprintf("Presence failure: %s: %s", failure.Type, failure.Reason)
+	}
+	return fmt.Sprintf("Presence failure: %s %s: %s", failure.Type, location, failure.Reason)
 }

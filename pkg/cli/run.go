@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -374,11 +375,11 @@ func displayTextResults(results []*eval.EvalResult) error {
 
 	totalTasks := len(results)
 	tasksPassed := 0
-	totalAssertions := 0
-	passedAssertions := 0
+	passedAssertions, totalAssertions, totalSkippedAssertions := countAssertions(results)
 	verificationFailedButAssertionsPassed := 0
 	verificationFailedButAssertionsPassedTotal := 0
 	verificationFailedButAssertionsPassedCount := 0
+	verificationFailedButAssertionsSkipped := 0
 
 	for _, result := range results {
 		if result.TaskPassed {
@@ -392,13 +393,11 @@ func displayTextResults(results []*eval.EvalResult) error {
 
 		// Count individual assertions
 		if result.AssertionResults != nil {
-			totalAssertions += result.AssertionResults.TotalAssertions()
-			passedAssertions += result.AssertionResults.PassedAssertions()
-
 			// Track assertions for verification-failed tasks
 			if !result.TaskPassed && !result.AgentExecutionError {
 				verificationFailedButAssertionsPassedTotal += result.AssertionResults.TotalAssertions()
 				verificationFailedButAssertionsPassedCount += result.AssertionResults.PassedAssertions()
+				verificationFailedButAssertionsSkipped += result.AssertionResults.SkippedCount()
 			}
 		}
 
@@ -442,14 +441,7 @@ func displayTextResults(results []*eval.EvalResult) error {
 		}
 
 		if result.AssertionResults != nil {
-			passed := result.AssertionResults.PassedAssertions()
-			total := result.AssertionResults.TotalAssertions()
-			if result.AllAssertionsPassed {
-				green.Printf("  Assertions: PASSED (%d/%d)\n", passed, total)
-			} else {
-				yellow.Printf("  Assertions: FAILED (%d/%d)\n", passed, total)
-				printFailedAssertions(result.AssertionResults)
-			}
+			printRunAssertionSummary(os.Stdout, result.AssertionResults, result.AllAssertionsPassed)
 		}
 
 		fmt.Println()
@@ -464,11 +456,12 @@ func displayTextResults(results []*eval.EvalResult) error {
 		yellow.Printf("Tasks Passed: %d/%d\n", tasksPassed, totalTasks)
 	}
 
-	if totalAssertions > 0 {
+	if totalAssertions > 0 || totalSkippedAssertions > 0 {
+		line := formatAssertionCountSummary("Assertions Passed", passedAssertions, totalAssertions, totalSkippedAssertions)
 		if passedAssertions == totalAssertions {
-			green.Printf("Assertions Passed: %d/%d\n", passedAssertions, totalAssertions)
+			green.Fprint(os.Stdout, line)
 		} else {
-			yellow.Printf("Assertions Passed: %d/%d\n", passedAssertions, totalAssertions)
+			yellow.Fprint(os.Stdout, line)
 		}
 	}
 
@@ -477,9 +470,16 @@ func displayTextResults(results []*eval.EvalResult) error {
 		fmt.Println()
 		yellow.Printf("Tasks where verification failed but assertions passed: %d\n", verificationFailedButAssertionsPassed)
 		if verificationFailedButAssertionsPassedTotal > 0 {
-			yellow.Printf("  Assertions in these tasks: %d/%d\n",
-				verificationFailedButAssertionsPassedCount,
-				verificationFailedButAssertionsPassedTotal)
+			if verificationFailedButAssertionsSkipped > 0 {
+				yellow.Printf("  Assertions in these tasks: %d/%d (%d skipped)\n",
+					verificationFailedButAssertionsPassedCount,
+					verificationFailedButAssertionsPassedTotal,
+					verificationFailedButAssertionsSkipped)
+			} else {
+				yellow.Printf("  Assertions in these tasks: %d/%d\n",
+					verificationFailedButAssertionsPassedCount,
+					verificationFailedButAssertionsPassedTotal)
+			}
 		}
 	}
 
@@ -516,6 +516,7 @@ func displayStatsByDifficulty(results []*eval.EvalResult, green *color.Color, ye
 		tasksPassed      int
 		totalAssertions  int
 		passedAssertions int
+		skippedAssertions int
 	}
 
 	statsByDifficulty := make(map[string]*difficultyStats)
@@ -540,6 +541,7 @@ func displayStatsByDifficulty(results []*eval.EvalResult, green *color.Color, ye
 		if result.AssertionResults != nil {
 			stats.totalAssertions += result.AssertionResults.TotalAssertions()
 			stats.passedAssertions += result.AssertionResults.PassedAssertions()
+			stats.skippedAssertions += result.AssertionResults.SkippedCount()
 		}
 	}
 
@@ -560,11 +562,12 @@ func displayStatsByDifficulty(results []*eval.EvalResult, green *color.Color, ye
 			yellow.Printf("  Tasks: %d/%d\n", stats.tasksPassed, stats.totalTasks)
 		}
 
-		if stats.totalAssertions > 0 {
+		if stats.totalAssertions > 0 || stats.skippedAssertions > 0 {
+			line := formatAssertionCountSummary("Assertions", stats.passedAssertions, stats.totalAssertions, stats.skippedAssertions)
 			if stats.passedAssertions == stats.totalAssertions {
-				green.Printf("  Assertions: %d/%d\n", stats.passedAssertions, stats.totalAssertions)
+				green.Fprint(os.Stdout, line)
 			} else {
-				yellow.Printf("  Assertions: %d/%d\n", stats.passedAssertions, stats.totalAssertions)
+				yellow.Fprint(os.Stdout, line)
 			}
 		}
 	}
@@ -590,37 +593,86 @@ func displayStatsByDifficulty(results []*eval.EvalResult, green *color.Color, ye
 			fmt.Printf("  Tasks: %d/%d\n", stats.tasksPassed, stats.totalTasks)
 		}
 
-		if stats.totalAssertions > 0 {
+		if stats.totalAssertions > 0 || stats.skippedAssertions > 0 {
+			line := formatAssertionCountSummary("Assertions", stats.passedAssertions, stats.totalAssertions, stats.skippedAssertions)
 			if stats.passedAssertions == stats.totalAssertions {
-				green.Printf("  Assertions: %d/%d\n", stats.passedAssertions, stats.totalAssertions)
+				green.Fprint(os.Stdout, line)
 			} else {
-				fmt.Printf("  Assertions: %d/%d\n", stats.passedAssertions, stats.totalAssertions)
+				fmt.Fprint(os.Stdout, line)
 			}
 		}
 	}
 }
 
-func printFailedAssertions(results *eval.CompositeAssertionResult) {
-	printSingleAssertion("ToolsUsed", results.ToolsUsed)
-	printSingleAssertion("RequireAny", results.RequireAny)
-	printSingleAssertion("ToolsNotUsed", results.ToolsNotUsed)
-	printSingleAssertion("MinToolCalls", results.MinToolCalls)
-	printSingleAssertion("MaxToolCalls", results.MaxToolCalls)
-	printSingleAssertion("ResourcesRead", results.ResourcesRead)
-	printSingleAssertion("ResourcesNotRead", results.ResourcesNotRead)
-	printSingleAssertion("PromptsUsed", results.PromptsUsed)
-	printSingleAssertion("PromptsNotUsed", results.PromptsNotUsed)
-	printSingleAssertion("CallOrder", results.CallOrder)
-	printSingleAssertion("NoDuplicateCalls", results.NoDuplicateCalls)
+func printRunAssertionSummary(w io.Writer, results *eval.CompositeAssertionResult, passed bool) {
+	skipped := results.SkippedCount()
+	for _, skippedAssertion := range results.SkippedAssertions {
+		fmt.Fprintf(w, "    %s\n", formatPresenceAssertion("SKIP", skippedAssertion))
+	}
+
+	status := "FAILED"
+	attribute := color.FgYellow
+	if passed {
+		status = "PASSED"
+		attribute = color.FgGreen
+	}
+	if skipped > 0 {
+		color.New(attribute).Fprintf(w,
+			"  Assertions: %s (%d/%d, %d skipped)\n", status, results.PassedAssertions(), results.TotalAssertions(), skipped)
+	} else {
+		color.New(attribute).Fprintf(w,
+			"  Assertions: %s (%d/%d)\n", status, results.PassedAssertions(), results.TotalAssertions())
+	}
+	if !passed {
+		printFailedAssertions(w, results)
+	}
 }
 
-func printSingleAssertion(name string, result *eval.SingleAssertionResult) {
+func printFailedAssertions(w io.Writer, results *eval.CompositeAssertionResult) {
+	printSingleAssertion(w, "ToolsUsed", results.ToolsUsed)
+	printSingleAssertion(w, "RequireAny", results.RequireAny)
+	printSingleAssertion(w, "ToolsNotUsed", results.ToolsNotUsed)
+	printSingleAssertion(w, "MinToolCalls", results.MinToolCalls)
+	printSingleAssertion(w, "MaxToolCalls", results.MaxToolCalls)
+	printSingleAssertion(w, "ResourcesRead", results.ResourcesRead)
+	printSingleAssertion(w, "ResourcesNotRead", results.ResourcesNotRead)
+	printSingleAssertion(w, "PromptsUsed", results.PromptsUsed)
+	printSingleAssertion(w, "PromptsNotUsed", results.PromptsNotUsed)
+	printSingleAssertion(w, "CallOrder", results.CallOrder)
+	printSingleAssertion(w, "NoDuplicateCalls", results.NoDuplicateCalls)
+
+	for _, failure := range results.PresenceFailures {
+		fmt.Fprintf(w, "    - Presence failure: %s\n", formatPresenceAssertion("", failure))
+	}
+}
+
+func printSingleAssertion(w io.Writer, name string, result *eval.SingleAssertionResult) {
 	if result != nil && !result.Passed {
-		fmt.Printf("    - %s: %s\n", name, result.Reason)
+		fmt.Fprintf(w, "    - %s: %s\n", name, result.Reason)
 		for _, detail := range result.Details {
-			fmt.Printf("      %s\n", detail)
+			fmt.Fprintf(w, "      %s\n", detail)
 		}
 	}
+}
+
+func countAssertions(results []*eval.EvalResult) (passed, total, skipped int) {
+	for _, result := range results {
+		if result.AssertionResults == nil {
+			continue
+		}
+		passed += result.AssertionResults.PassedAssertions()
+		total += result.AssertionResults.TotalAssertions()
+		skipped += result.AssertionResults.SkippedCount()
+	}
+	return passed, total, skipped
+}
+
+func formatAssertionCountSummary(label string, passed, total, skipped int) string {
+	line := fmt.Sprintf("%s: %d/%d", label, passed, total)
+	if skipped > 0 {
+		line += fmt.Sprintf(" (%d skipped)", skipped)
+	}
+	return line + "\n"
 }
 
 func saveOutputToFile(output *eval.EvalOutput, filename string) error {

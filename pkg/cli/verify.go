@@ -75,7 +75,9 @@ func outputVerifyResults(stats results.Stats, taskThreshold, assertionThreshold 
 	}
 
 	// Assertion threshold
-	if stats.AssertionsTotal == 0 {
+	if stats.AssertionsTotal == 0 && stats.AssertionsSkipped > 0 {
+		fmt.Printf("Assertion Pass Rate: N/A (%d assertions skipped)\n", stats.AssertionsSkipped)
+	} else if stats.AssertionsTotal == 0 {
 		fmt.Println("Assertion Pass Rate: N/A (no assertions defined)")
 	} else if assertionMet {
 		_, _ = green.Printf("Assertion Pass Rate: %.2f%% >= %.2f%% ✓\n",

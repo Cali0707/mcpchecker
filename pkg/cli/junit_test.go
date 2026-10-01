@@ -171,6 +171,46 @@ func TestBuildJUnitSuiteWithFailure(t *testing.T) {
 	}
 }
 
+func TestBuildJUnitSuitePresenceAndSkippedAssertions(t *testing.T) {
+	results := []*eval.EvalResult{
+		{
+			TaskName:            "skipped-tool",
+			TaskPath:            "/path/to/skipped.yaml",
+			TaskPassed:          true,
+			AllAssertionsPassed: true,
+			AssertionResults: &eval.CompositeAssertionResult{
+				SkippedAssertions: []eval.AssertionPresenceResult{{Type: "toolsUsed", Server: "kubernetes", Target: "pods_create", Reason: "tool not present"}},
+			},
+		},
+		{
+			TaskName:            "strict-missing-tool",
+			TaskPath:            "/path/to/strict.yaml",
+			TaskPassed:          true,
+			AllAssertionsPassed: false,
+			AssertionResults: &eval.CompositeAssertionResult{
+				PresenceFailures: []eval.AssertionPresenceResult{{Type: "toolsUsed", Server: "kubernetes", Target: "pods_create", Reason: "tool not present"}},
+			},
+		},
+	}
+
+	suite := buildJUnitSuite(results, viewOptions{})
+	if suite.Failures != 1 {
+		t.Fatalf("suite.Failures = %d, want 1", suite.Failures)
+	}
+	if suite.Cases[0].Failure != nil {
+		t.Error("skipped assertion should not be represented as a JUnit failure")
+	}
+	if !strings.Contains(suite.Cases[0].SystemOut, "SKIP toolsUsed kubernetes/pods_create: tool not present") {
+		t.Errorf("SystemOut should report skipped assertion, got %q", suite.Cases[0].SystemOut)
+	}
+	if suite.Cases[1].Failure == nil {
+		t.Fatal("strict presence failure should be represented as a JUnit failure")
+	}
+	if !strings.Contains(suite.Cases[1].Failure.Body, "toolsUsed kubernetes/pods_create: tool not present") {
+		t.Errorf("Failure.Body should contain presence failure, got %q", suite.Cases[1].Failure.Body)
+	}
+}
+
 func TestBuildJUnitSuiteWithError(t *testing.T) {
 	results := []*eval.EvalResult{
 		{

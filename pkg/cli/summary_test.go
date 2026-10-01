@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -129,6 +130,42 @@ func TestBuildSummaryOutput(t *testing.T) {
 	// Check failed task
 	if summary.Tasks[2].TaskError == "" {
 		t.Error("Tasks[2].TaskError should not be empty")
+	}
+}
+
+func TestBuildSummaryOutputPresenceResults(t *testing.T) {
+	result := &eval.EvalResult{
+		TaskName:            "presence-results",
+		TaskPassed:          true,
+		AllAssertionsPassed: false,
+		AssertionResults: &eval.CompositeAssertionResult{
+			ToolsUsed:         &eval.SingleAssertionResult{Passed: true},
+			SkippedAssertions: []eval.AssertionPresenceResult{{Type: "toolsUsed", Server: "kubernetes", Target: "pods_create", Reason: "tool not present"}},
+			PresenceFailures:  []eval.AssertionPresenceResult{{Type: "toolsNotUsed", Server: "kubernetes", Reason: "server not present"}},
+		},
+	}
+	summary := buildSummaryOutput("test.json", []*eval.EvalResult{result})
+
+	if summary.AssertionsTotal != 2 || summary.AssertionsPassed != 1 || summary.AssertionsSkipped != 1 {
+		t.Errorf("assertion counts = %d/%d with %d skipped, want 1/2 with 1 skipped", summary.AssertionsPassed, summary.AssertionsTotal, summary.AssertionsSkipped)
+	}
+	if len(summary.Tasks[0].SkippedAssertions) != 1 || len(summary.Tasks[0].PresenceFailures) != 1 {
+		t.Fatalf("task presence data = %d skips, %d failures, want 1 each", len(summary.Tasks[0].SkippedAssertions), len(summary.Tasks[0].PresenceFailures))
+	}
+	if len(summary.Tasks[0].FailedAssertions) != 1 || !strings.Contains(summary.Tasks[0].FailedAssertions[0], "Presence failure:") {
+		t.Errorf("FailedAssertions = %#v, want strict presence failure", summary.Tasks[0].FailedAssertions)
+	}
+
+	data, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatalf("failed to marshal summary: %v", err)
+	}
+	var roundTrip SummaryOutput
+	if err := json.Unmarshal(data, &roundTrip); err != nil {
+		t.Fatalf("failed to unmarshal summary: %v", err)
+	}
+	if len(roundTrip.Tasks[0].SkippedAssertions) != 1 || len(roundTrip.Tasks[0].PresenceFailures) != 1 {
+		t.Errorf("round-trip task data = %#v, want structured skips and presence failures", roundTrip.Tasks[0])
 	}
 }
 
