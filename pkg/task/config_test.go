@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/mcpchecker/mcpchecker/pkg/assertion"
 	"github.com/mcpchecker/mcpchecker/pkg/steps"
 	"github.com/mcpchecker/mcpchecker/pkg/util"
 	"github.com/stretchr/testify/assert"
@@ -171,6 +172,49 @@ kubectl delete namespace create-pod-test --ignore-not-found`,
 
 			assert.NoError(t, err)
 			assert.Equal(t, tc.expected, got)
+		})
+	}
+}
+
+func TestReadTaskAssertions(t *testing.T) {
+	tests := []struct {
+		name           string
+		assertionsYAML string
+		requirePresent bool
+	}{
+		{
+			name: "assertions with requirePresent",
+			assertionsYAML: `
+    assertions:
+      requirePresent: true
+      toolsUsed:
+        - server: kubernetes
+          tool: pods_create`,
+			requirePresent: true,
+		},
+		{
+			name: "requirePresent defaults to false",
+			assertionsYAML: `
+    assertions:
+      toolsUsed:
+        - server: kubernetes
+          tool: pods_create`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := []byte(`apiVersion: mcpchecker/v1alpha2
+kind: Task
+metadata:
+  name: assertion task
+spec:` + tt.assertionsYAML)
+
+			got, err := Read(data, "")
+			require.NoError(t, err)
+			require.NotNil(t, got.Spec.Assertions)
+			assert.Equal(t, tt.requirePresent, got.Spec.Assertions.RequirePresent)
+			assert.Equal(t, []assertion.ToolAssertion{{Server: "kubernetes", Tool: "pods_create"}}, got.Spec.Assertions.ToolsUsed)
 		})
 	}
 }

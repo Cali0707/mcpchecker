@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/mcpchecker/mcpchecker/pkg/assertion"
 	"github.com/mcpchecker/mcpchecker/pkg/llmjudge"
 	"github.com/mcpchecker/mcpchecker/pkg/steps"
 	"github.com/mcpchecker/mcpchecker/pkg/util"
@@ -35,12 +36,13 @@ type TaskMetadata struct {
 }
 
 type TaskSpec struct {
-	Requires []Requirements      `json:"requires,omitempty"`
-	Limits   *util.Limits        `json:"limits,omitempty"`
-	Setup    []*steps.StepConfig `json:"setup,omitempty"`
-	Cleanup  []*steps.StepConfig `json:"cleanup,omitempty"`
-	Verify   []*steps.StepConfig `json:"verify,omitempty"`
-	Prompt   *util.Step          `json:"prompt,omitempty"`
+	Requires   []Requirements            `json:"requires,omitempty"`
+	Limits     *util.Limits              `json:"limits,omitempty"`
+	Assertions *assertion.TaskAssertions `json:"assertions,omitempty"`
+	Setup      []*steps.StepConfig       `json:"setup,omitempty"`
+	Cleanup    []*steps.StepConfig       `json:"cleanup,omitempty"`
+	Verify     []*steps.StepConfig       `json:"verify,omitempty"`
+	Prompt     *util.Step                `json:"prompt,omitempty"`
 }
 
 type Requirements struct {
@@ -143,6 +145,11 @@ func Read(data []byte, basePath string) (*TaskConfig, error) {
 		spec.Spec, err = translateV1Alpha1ToSteps(s)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert v1alpha1 format to v1alpha1: %w", err)
+		}
+	}
+	if spec.Spec != nil {
+		if err := spec.Spec.Assertions.Validate(); err != nil {
+			return nil, fmt.Errorf("spec.assertions: %w", err)
 		}
 	}
 

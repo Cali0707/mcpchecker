@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/mcpchecker/mcpchecker/pkg/agent"
+	"github.com/mcpchecker/mcpchecker/pkg/assertion"
 	"github.com/mcpchecker/mcpchecker/pkg/extension"
 	"github.com/mcpchecker/mcpchecker/pkg/llmjudge"
 	"github.com/mcpchecker/mcpchecker/pkg/util"
@@ -97,79 +98,17 @@ type TaskSet struct {
 	// All specified labels must match (AND logic)
 	LabelSelector map[string]string `json:"labelSelector,omitempty"`
 
-	Assertions *TaskAssertions `json:"assertions,omitempty"`
+	Assertions *assertion.TaskAssertions `json:"assertions,omitempty"`
 }
 
-// TODO: add a custom Verify script for another form of assertion
-type TaskAssertions struct {
-	// Tool assertions
-	ToolsUsed    []ToolAssertion `json:"toolsUsed,omitempty"`
-	RequireAny   []ToolAssertion `json:"requireAny,omitempty"`
-	ToolsNotUsed []ToolAssertion `json:"toolsNotUsed,omitempty"`
-	MinToolCalls *int            `json:"minToolCalls,omitempty"`
-	MaxToolCalls *int            `json:"maxToolCalls,omitempty"`
-
-	// Resource assertions
-	ResourcesRead    []ResourceAssertion `json:"resourcesRead,omitempty"`
-	ResourcesNotRead []ResourceAssertion `json:"resourcesNotRead,omitempty"`
-
-	// Prompt assertions
-	PromptsUsed    []PromptAssertion `json:"promptsUsed,omitempty"`
-	PromptsNotUsed []PromptAssertion `json:"promptsNotUsed,omitempty"`
-
-	// Order assertions
-	CallOrder []CallOrderAssertion `json:"callOrder,omitempty"`
-
-	// Efficiency assertions
-	NoDuplicateCalls bool `json:"noDuplicateCalls,omitempty"`
-
-	// Skill assertions - evaluated against agent tool calls
-	SkillsLoaded    []SkillAssertion `json:"skillsLoaded,omitempty"`
-	SkillsNotLoaded []SkillAssertion `json:"skillsNotLoaded,omitempty"`
-}
-
-// SkillAssertion identifies a skill by name or pattern for assertion matching.
-// Matching is done by searching the serialized RawInput of agent tool calls
-// whose Title matches the configured skill tool name.
-type SkillAssertion struct {
-	// Skill is the exact skill name to match (quoted string match in serialized tool call input)
-	Skill string `json:"skill,omitempty"`
-	// SkillPattern is a regex pattern to match against tool call input
-	SkillPattern string `json:"skillPattern,omitempty"`
-}
-
-type ToolAssertion struct {
-	Server string `json:"server"`
-
-	// Exactly one of Tool or ToolPattern should be set
-	// If neither is set, matches any tool from the server
-	Tool        string `json:"tool,omitempty"`
-	ToolPattern string `json:"toolPattern,omitempty"` // regex pattern
-}
-
-type ResourceAssertion struct {
-	Server string `json:"server"`
-
-	// Exactly one of URI or URIPattern should be set
-	// If neither is set, matches any resource from the server
-	URI        string `json:"uri,omitempty"`
-	URIPattern string `json:"uriPattern,omitempty"` // regex pattern
-}
-
-type PromptAssertion struct {
-	Server string `json:"server"`
-
-	// Exactly one of Prompt or PromptPattern should be set
-	// If neither is set, matches any prompt from the server
-	Prompt        string `json:"prompt,omitempty"`
-	PromptPattern string `json:"promptPattern,omitempty"`
-}
-
-type CallOrderAssertion struct {
-	Type   string `json:"type"` // "tool", "resource", "prompt"
-	Server string `json:"server"`
-	Name   string `json:"name"`
-}
+// Type aliases preserve the existing pkg/eval assertion API while the shared
+// definitions live in pkg/assertion.
+type TaskAssertions = assertion.TaskAssertions
+type ToolAssertion = assertion.ToolAssertion
+type ResourceAssertion = assertion.ResourceAssertion
+type PromptAssertion = assertion.PromptAssertion
+type CallOrderAssertion = assertion.CallOrderAssertion
+type SkillAssertion = assertion.SkillAssertion
 
 func Read(data []byte, basePath string) (*EvalSpec, error) {
 	spec := &EvalSpec{}
@@ -181,6 +120,11 @@ func Read(data []byte, basePath string) (*EvalSpec, error) {
 
 	if err := spec.TypeMeta.Validate(KindEval); err != nil {
 		return nil, err
+	}
+	for i := range spec.Config.TaskSets {
+		if err := spec.Config.TaskSets[i].Assertions.Validate(); err != nil {
+			return nil, fmt.Errorf("taskSets[%d].assertions: %w", i, err)
+		}
 	}
 
 	// Store the base path for later use (e.g., resolving extension paths)

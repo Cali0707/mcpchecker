@@ -31,6 +31,33 @@ func TestReadJudgeRefPathResolution(t *testing.T) {
 	assert.Equal(t, filepath.Join(basePath, "agents/judge.yaml"), spec.Config.LLMJudge.AgentRef.Path)
 }
 
+func TestReadTaskSetAssertionsRequirePresent(t *testing.T) {
+	data := []byte(`kind: Eval
+config:
+  taskSets:
+    - glob: tasks/*.yaml
+      assertions:
+        requirePresent: true
+        toolsUsed:
+          - server: kubernetes
+            tool: pods_create
+    - glob: other-tasks/*.yaml
+      assertions:
+        toolsUsed:
+          - server: kubernetes
+            tool: pods_get
+`)
+
+	spec, err := Read(data, "")
+	require.NoError(t, err)
+	require.Len(t, spec.Config.TaskSets, 2)
+
+	assert.True(t, spec.Config.TaskSets[0].Assertions.RequirePresent)
+	assert.Equal(t, []ToolAssertion{{Server: "kubernetes", Tool: "pods_create"}}, spec.Config.TaskSets[0].Assertions.ToolsUsed)
+	assert.False(t, spec.Config.TaskSets[1].Assertions.RequirePresent)
+	assert.Equal(t, []ToolAssertion{{Server: "kubernetes", Tool: "pods_get"}}, spec.Config.TaskSets[1].Assertions.ToolsUsed)
+}
+
 func TestReadSourceSpec(t *testing.T) {
 	basePath, err := os.Getwd()
 	require.NoError(t, err)
