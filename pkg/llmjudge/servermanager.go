@@ -105,8 +105,8 @@ func (s *judgeServerProxy) GetName() string {
 }
 
 // GetAllowedTools returns all the tools the user allowed
-func (s *judgeServerProxy) GetAllowedTools(ctx context.Context) []*mcp.Tool {
-	return []*mcp.Tool{s.server.GetSubmitJudgementTool()}
+func (s *judgeServerProxy) GetAllowedTools(ctx context.Context) ([]*mcp.Tool, error) {
+	return []*mcp.Tool{s.server.GetSubmitJudgementTool()}, nil
 }
 
 // GetInstructions returns the server instructions from InitializeResult

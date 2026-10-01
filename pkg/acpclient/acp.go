@@ -32,7 +32,11 @@ func (c *client) RequestPermission(ctx context.Context, params acp.RequestPermis
 	}
 
 	session.recordPermissionToolCall(params.ToolCall)
-	if session.isAllowedToolCall(ctx, params.ToolCall) {
+	allowed, err := session.isAllowedToolCall(ctx, params.ToolCall)
+	if err != nil {
+		return acp.RequestPermissionResponse{}, fmt.Errorf("failed to check tool permission: %w", err)
+	}
+	if allowed {
 		// try to find an always allow or allow once option, else default to first opt
 		bestOpt := params.Options[0]
 		for _, opt := range params.Options {

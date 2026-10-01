@@ -554,7 +554,11 @@ func (a *agentSpecRunner) RunTask(ctx context.Context, prompt string) (AgentResu
 
 	var allowedTools []string
 	for _, s := range a.mcpInfo.GetMcpServers() {
-		for _, t := range s.GetAllowedTools(ctx) {
+		tools, err := s.GetAllowedTools(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to discover allowed tools for MCP server %q: %w", s.GetName(), err)
+		}
+		for _, t := range tools {
 			tmp := struct {
 				ServerName string
 				ToolName   string

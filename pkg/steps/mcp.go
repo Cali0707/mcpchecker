@@ -37,7 +37,11 @@ func NewMcpServerParser(ctx context.Context, serverName string) PrefixParser {
 		}
 
 		found := false
-		for _, t := range client.GetAllowedTools(ctx) {
+		allowedTools, err := client.GetAllowedTools(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to discover allowed tools for MCP server %q: %w", serverName, err)
+		}
+		for _, t := range allowedTools {
 			if t.Name == toolName {
 				found = true
 			}

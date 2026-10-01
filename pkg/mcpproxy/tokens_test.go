@@ -3,6 +3,7 @@ package mcpproxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -17,16 +18,19 @@ type testServer struct {
 	name         string
 	instructions string
 	allowedTools []*mcp.Tool
+	toolsErr     error
 }
 
-func (s *testServer) Run(_ context.Context) error                   { return nil }
-func (s *testServer) GetConfig() (*mcpclient.ServerConfig, error)   { return nil, nil }
-func (s *testServer) GetName() string                               { return s.name }
-func (s *testServer) GetAllowedTools(_ context.Context) []*mcp.Tool { return s.allowedTools }
-func (s *testServer) GetInstructions() string                       { return s.instructions }
-func (s *testServer) Close() error                                  { return nil }
-func (s *testServer) GetCallHistory() CallHistory                   { return CallHistory{} }
-func (s *testServer) WaitReady(_ context.Context) error             { return nil }
+func (s *testServer) Run(_ context.Context) error                 { return nil }
+func (s *testServer) GetConfig() (*mcpclient.ServerConfig, error) { return nil, nil }
+func (s *testServer) GetName() string                             { return s.name }
+func (s *testServer) GetAllowedTools(_ context.Context) ([]*mcp.Tool, error) {
+	return s.allowedTools, s.toolsErr
+}
+func (s *testServer) GetInstructions() string           { return s.instructions }
+func (s *testServer) Close() error                      { return nil }
+func (s *testServer) GetCallHistory() CallHistory       { return CallHistory{} }
+func (s *testServer) WaitReady(_ context.Context) error { return nil }
 
 func TestComputeCallHistoryTokens_NilHistory(t *testing.T) {
 	// Should not panic
@@ -316,4 +320,15 @@ func TestComputeSchemaTokens_NilInputSchema(t *testing.T) {
 	total, err := ComputeSchemaTokens(context.Background(), servers)
 	require.NoError(t, err)
 	assert.Greater(t, total, int64(0)) // should still count name + description
+}
+
+func TestComputeSchemaTokens_ReturnsToolDiscoveryError(t *testing.T) {
+	wantErr := errors.New("list tools failed")
+	servers := []Server{
+		&testServer{name: "broken-server", toolsErr: wantErr},
+	}
+
+	_, err := ComputeSchemaTokens(context.Background(), servers)
+	require.ErrorIs(t, err, wantErr)
+	assert.Contains(t, err.Error(), "broken-server")
 }
