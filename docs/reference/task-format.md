@@ -30,6 +30,7 @@ metadata:
   runs: int           # Optional. Number of times to run this task (default: 1). Useful for consistency testing.
 
 spec:
+  assertions:         # Optional. Assertions evaluated against agent behavior.
   requires:           # Optional. Extension requirements.
     - extension: string
 
@@ -50,6 +51,18 @@ spec:
     inline: string    # Inline prompt text.
     # or
     file: string      # Path to prompt file.
+```
+
+### Task-level Assertions
+
+Assertions can be defined in a task at `spec.assertions`. They are combined with the assertions from every eval task set that matches the task. The task-level assertion set is added once, even when the task matches multiple task sets. Each assertion set is evaluated independently, and all sets must pass for the task's assertions to pass. See [Use Assertions](../how-to/use-assertions.md) for assertion types and capability-aware skipping behavior.
+
+```yaml
+spec:
+  assertions:
+    toolsUsed:
+      - server: kubernetes
+        tool: pods_create
 ```
 
 ### Step Format

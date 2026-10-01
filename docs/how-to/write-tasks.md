@@ -273,6 +273,18 @@ config:
         maxToolCalls: 10
 ```
 
+Assertions can also be placed on the task itself under `spec.assertions`. For a task matched by multiple task sets, mcpchecker combines its task-level assertions with the assertions from every matching set. The task-level assertions are included only once, and all assertion sets must pass. For example, an eval-wide call limit can be applied to every matching task:
+
+```yaml
+config:
+  taskSets:
+    - glob: tasks/*.yaml
+      assertions:
+        maxToolCalls: 20
+```
+
+Presence handling, including the `requirePresent` option for task-level and eval-level assertions, is described in [Use Assertions](use-assertions.md#task-level-assertions-and-composition).
+
 For more on assertions, see [Use Assertions](use-assertions.md).
 
 For LLM-based verification, see [LLM Judge Verification](llm-judge.md).
