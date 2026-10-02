@@ -106,6 +106,46 @@ func TestCalculateDiff(t *testing.T) {
 	}
 }
 
+func TestDiffOutputsSkippedAssertionCounts(t *testing.T) {
+	base := []*eval.EvalResult{{
+		TaskName:            "tool-removal",
+		TaskPassed:          true,
+		AllAssertionsPassed: true,
+		AssertionResults: &eval.CompositeAssertionResult{
+			ToolsUsed:         &eval.SingleAssertionResult{Passed: true},
+			SkippedAssertions: []eval.AssertionPresenceResult{{Type: "toolsUsed", Server: "kubernetes", Target: "pods_create", Reason: "tool not present"}},
+		},
+	}}
+	head := []*eval.EvalResult{{
+		TaskName:            "tool-removal",
+		TaskPassed:          true,
+		AllAssertionsPassed: true,
+		AssertionResults: &eval.CompositeAssertionResult{
+			ToolsUsed: &eval.SingleAssertionResult{Passed: true},
+			SkippedAssertions: []eval.AssertionPresenceResult{
+				{Type: "toolsUsed", Server: "kubernetes", Target: "pods_create", Reason: "tool not present"},
+				{Type: "toolsUsed", Server: "kubernetes", Target: "pods_update", Reason: "tool not present"},
+			},
+		},
+	}}
+	diff := calculateDiff("base.json", "head.json", base, head)
+	if diff.BaseStats.AssertionsSkipped != 1 || diff.HeadStats.AssertionsSkipped != 2 {
+		t.Fatalf("skipped stats = %d/%d, want 1/2", diff.BaseStats.AssertionsSkipped, diff.HeadStats.AssertionsSkipped)
+	}
+
+	baseText := formatDiffAssertionCount(diff.BaseStats)
+	headText := formatDiffAssertionCount(diff.HeadStats)
+	if !strings.Contains(baseText, "1 skipped") || !strings.Contains(headText, "2 skipped") {
+		t.Errorf("text diff assertion counts = %q / %q, want skip counts 1 / 2", baseText, headText)
+	}
+
+	baseMarkdown := formatDiffAssertionRate(diff.BaseStats)
+	headMarkdown := formatDiffAssertionRate(diff.HeadStats)
+	if !strings.Contains(baseMarkdown, "1/1 (1 skipped, 100.0%)") || !strings.Contains(headMarkdown, "1/1 (2 skipped, 100.0%)") {
+		t.Errorf("markdown diff assertion counts = %q / %q, want skip counts and rates", baseMarkdown, headMarkdown)
+	}
+}
+
 func TestCalculateDiffRegressions(t *testing.T) {
 	// Swap base and head to test regressions
 	baseResults := sampleResultsImproved()

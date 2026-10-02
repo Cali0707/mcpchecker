@@ -19,7 +19,7 @@ type Server interface {
 	// GetName returns the name of the MCP server
 	GetName() string
 	// GetAllowedTools returns all the tools the user allowed
-	GetAllowedTools(ctx context.Context) []*mcp.Tool
+	GetAllowedTools(ctx context.Context) ([]*mcp.Tool, error)
 	// GetInstructions returns the server instructions from InitializeResult
 	GetInstructions() string
 	// Close closes the MCP proxy server, but not the underlying client connection
@@ -93,7 +93,7 @@ func createProxyServer(ctx context.Context, cs *mcp.ClientSession, r Recorder) (
 	if opts.Capabilities.Prompts != nil {
 		for p, err := range cs.Prompts(ctx, &mcp.ListPromptsParams{}) {
 			if err != nil {
-				continue
+				return nil, fmt.Errorf("failed to list prompts: %w", err)
 			}
 			s.AddPrompt(p, func(ctx context.Context, gpr *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 				start := time.Now()
@@ -107,7 +107,7 @@ func createProxyServer(ctx context.Context, cs *mcp.ClientSession, r Recorder) (
 	if opts.Capabilities.Resources != nil {
 		for rr, err := range cs.Resources(ctx, &mcp.ListResourcesParams{}) {
 			if err != nil {
-				continue
+				return nil, fmt.Errorf("failed to list resources: %w", err)
 			}
 			s.AddResource(rr, func(ctx context.Context, rrr *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 				start := time.Now()
@@ -119,7 +119,7 @@ func createProxyServer(ctx context.Context, cs *mcp.ClientSession, r Recorder) (
 
 		for rt, err := range cs.ResourceTemplates(ctx, &mcp.ListResourceTemplatesParams{}) {
 			if err != nil {
-				continue
+				return nil, fmt.Errorf("failed to list resource templates: %w", err)
 			}
 			s.AddResourceTemplate(rt, func(ctx context.Context, rrr *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 				start := time.Now()
@@ -133,7 +133,7 @@ func createProxyServer(ctx context.Context, cs *mcp.ClientSession, r Recorder) (
 	if opts.Capabilities.Tools != nil {
 		for t, err := range cs.Tools(ctx, &mcp.ListToolsParams{}) {
 			if err != nil {
-				continue
+				return nil, fmt.Errorf("failed to list tools: %w", err)
 			}
 			s.AddTool(t, func(ctx context.Context, ctr *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				start := time.Now()
@@ -228,7 +228,7 @@ func (s *server) GetName() string {
 	return s.name
 }
 
-func (s *server) GetAllowedTools(ctx context.Context) []*mcp.Tool {
+func (s *server) GetAllowedTools(ctx context.Context) ([]*mcp.Tool, error) {
 	return s.proxyClient.GetAllowedTools(ctx)
 }
 

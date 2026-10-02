@@ -224,16 +224,29 @@ func printAssertions(w io.Writer, results *eval.CompositeAssertionResult, warn *
 
 	failed := results.FailedAssertions()
 	total := results.TotalAssertions()
-	if total == 0 {
+	skipped := results.SkippedCount()
+	if total == 0 && skipped == 0 {
 		return
 	}
 
-	if failed == 0 {
+	if skipped > 0 {
+		if failed == 0 {
+			fmt.Fprintf(w, "  Assertions: %d/%d (%d skipped)\n", results.PassedAssertions(), total, skipped)
+		} else {
+			warn.Fprintf(w, "  Assertions: %d/%d (%d skipped)\n", results.PassedAssertions(), total, skipped)
+		}
+	} else if failed == 0 {
 		fmt.Fprintf(w, "  Assertions: %d/%d passed\n", total, total)
-		return
+	} else {
+		warn.Fprintf(w, "  Assertions: %d/%d passed\n", total-failed, total)
 	}
 
-	warn.Fprintf(w, "  Assertions: %d/%d passed\n", total-failed, total)
+	for _, skippedAssertion := range results.SkippedAssertions {
+		fmt.Fprintf(w, "    • %s\n", formatPresenceAssertion("SKIP", skippedAssertion))
+	}
+	for _, failure := range results.PresenceFailures {
+		fmt.Fprintf(w, "    • Presence failure: %s\n", formatPresenceAssertion("", failure))
+	}
 
 	val := reflect.ValueOf(results).Elem()
 	typ := val.Type()
@@ -256,6 +269,25 @@ func printAssertions(w io.Writer, results *eval.CompositeAssertionResult, warn *
 			fmt.Fprintf(w, "      %s\n", detail)
 		}
 	}
+}
+
+func formatPresenceAssertion(prefix string, result eval.AssertionPresenceResult) string {
+	location := result.Server
+	if result.Target != "" {
+		if location != "" {
+			location += "/"
+		}
+		location += result.Target
+	}
+
+	message := result.Type
+	if location != "" {
+		message += " " + location
+	}
+	if prefix != "" {
+		message = prefix + " " + message
+	}
+	return message + ": " + result.Reason
 }
 
 // printCallHistory writes an aggregated summary of tool/resource/prompt usage.

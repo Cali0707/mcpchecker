@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -269,7 +270,10 @@ func (r *evalRunner) RunWithProgress(ctx context.Context, taskPattern string, ca
 	}
 
 	// Build summary from resolved configuration
-	summary := r.buildSummary(ctx, agentSpec, mcpConfig, judge, taskConfigs)
+	summary, err := r.buildSummary(ctx, agentSpec, mcpConfig, judge, taskConfigs)
+	if err != nil {
+		return nil, err
+	}
 
 	r.progressCallback(ProgressEvent{
 		Type:    EventEvalStart,
@@ -310,7 +314,7 @@ func (r *evalRunner) buildSummary(
 	mcpConfig *mcpclient.MCPConfig,
 	judge llmjudge.LLMJudge,
 	taskConfigs []taskConfig,
-) *EvalSummary {
+) (*EvalSummary, error) {
 	summary := &EvalSummary{
 		ParallelWorkers: r.parallelWorkers,
 		Runs:            r.runs,
@@ -381,12 +385,17 @@ func (r *evalRunner) buildSummary(
 			}
 			if mcpManager != nil {
 				if c, ok := mcpManager.Get(name); ok {
-					for _, tool := range c.GetAllowedTools(ctx) {
-						serverSummary.Tools = append(serverSummary.Tools, ToolSummary{
-							Name:        tool.Name,
-							Description: tool.Description,
-							InputSchema: tool.InputSchema,
-						})
+					tools, err := c.GetAllowedTools(ctx)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to discover allowed tools for MCP server %q while building summary: %v\n", name, err)
+					} else {
+						for _, tool := range tools {
+							serverSummary.Tools = append(serverSummary.Tools, ToolSummary{
+								Name:        tool.Name,
+								Description: tool.Description,
+								InputSchema: tool.InputSchema,
+							})
+						}
 					}
 				}
 			}
@@ -443,7 +452,7 @@ func (r *evalRunner) buildSummary(
 		summary.Timeout = timeout
 	}
 
-	return summary
+	return summary, nil
 }
 
 func (r *evalRunner) collectTaskConfigs(rx *regexp.Regexp) ([]taskConfig, error) {
@@ -496,7 +505,7 @@ func (r *evalRunner) collectTaskConfigs(rx *regexp.Regexp) ([]taskConfig, error)
 
 			// If task already exists, append assertions to evaluate independently
 			if idx, exists := seen[canonicalPath]; exists {
-				if ts.Assertions != nil {
+				if ts.Assertions != nil && !ts.Assertions.IsEmpty() {
 					taskConfigs[idx].assertions = append(taskConfigs[idx].assertions, ts.Assertions)
 				}
 				continue
@@ -504,8 +513,11 @@ func (r *evalRunner) collectTaskConfigs(rx *regexp.Regexp) ([]taskConfig, error)
 
 			seen[canonicalPath] = len(taskConfigs)
 			var assertions []*TaskAssertions
-			if ts.Assertions != nil {
-				assertions = []*TaskAssertions{ts.Assertions}
+			if taskSpec.Spec != nil && taskSpec.Spec.Assertions != nil && !taskSpec.Spec.Assertions.IsEmpty() {
+				assertions = append(assertions, taskSpec.Spec.Assertions)
+			}
+			if ts.Assertions != nil && !ts.Assertions.IsEmpty() {
+				assertions = append(assertions, ts.Assertions)
 			}
 			taskConfigs = append(taskConfigs, taskConfig{
 				path:       displayPath,
@@ -854,7 +866,20 @@ func (r *evalRunner) runTask(
 		Task:    result,
 	})
 
-	r.evaluateTaskAssertions(tc, manager, result)
+	if err := r.evaluateTaskAssertions(ctx, tc, manager, result); err != nil {
+		result.TaskPassed = false
+		assertionErr := fmt.Sprintf("assertion evaluation failed: %s", err)
+		if result.TaskError == "" {
+			result.TaskError = assertionErr
+		} else {
+			result.TaskError = fmt.Sprintf("%s; %s", result.TaskError, assertionErr)
+		}
+		r.progressCallback(ProgressEvent{
+			Type:    EventTaskError,
+			Message: fmt.Sprintf("Task assertion evaluation failed: %s", tc.spec.Metadata.Name),
+			Task:    result,
+		})
+	}
 
 	result.CallHistory = manager.GetAllCallHistory()
 
@@ -1032,18 +1057,50 @@ func (r *evalRunner) extractJudgeResults(verifyOutput *task.PhaseOutput, result 
 }
 
 func (r *evalRunner) evaluateTaskAssertions(
+	ctx context.Context,
 	tc taskConfig,
 	manager mcpproxy.ServerManager,
 	result *EvalResult,
-) {
+) error {
 	if len(tc.assertions) == 0 {
 		// No assertions = all pass
 		result.AllAssertionsPassed = true
-		return
+		return nil
+	}
+
+	// Capture live capabilities once for this task. Keep every server in the
+	// inventory, but only query tools for servers referenced by tool assertions.
+	inventory := make(CapabilityInventory)
+	servers := make(map[string]mcpproxy.Server)
+	for _, server := range manager.GetMcpServers() {
+		serverName := server.GetName()
+		servers[serverName] = server
+		inventory[serverName] = nil
+	}
+	for serverName := range requiredToolDiscoveryServers(tc.assertions) {
+		server, present := servers[serverName]
+		if !present {
+			continue
+		}
+		tools, err := server.GetAllowedTools(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to discover allowed tools for MCP server %q: %w", serverName, err)
+		}
+
+		visibleTools := make([]string, 0, len(tools))
+		for _, tool := range tools {
+			if tool != nil {
+				visibleTools = append(visibleTools, tool.Name)
+			}
+		}
+		inventory[serverName] = visibleTools
 	}
 
 	// Evaluate each assertion set independently and combine results
 	callHistory := manager.GetAllCallHistory()
+	if callHistory == nil {
+		callHistory = &mcpproxy.CallHistory{}
+	}
 	var combinedResults *CompositeAssertionResult
 	allPassed := true
 
@@ -1057,11 +1114,15 @@ func (r *evalRunner) evaluateTaskAssertions(
 		if assertions == nil {
 			continue
 		}
-		evaluator := NewCompositeAssertionEvaluator(assertions)
+		resolution := ResolveCapabilities(*assertions, inventory)
+		filteredAssertions := &resolution.Assertions
+		evaluator := NewCompositeAssertionEvaluator(filteredAssertions)
 		assertionResults := evaluator.Evaluate(callHistory)
+		assertionResults.SkippedAssertions = append(assertionResults.SkippedAssertions, resolution.SkippedAssertions...)
+		assertionResults.PresenceFailures = append(assertionResults.PresenceFailures, resolution.PresenceFailures...)
 
 		// Evaluate skill assertions against agent tool calls
-		r.evaluateSkillAssertions(assertions, agentToolCalls, assertionResults)
+		r.evaluateSkillAssertions(filteredAssertions, agentToolCalls, assertionResults)
 
 		if combinedResults == nil {
 			combinedResults = assertionResults
@@ -1076,6 +1137,32 @@ func (r *evalRunner) evaluateTaskAssertions(
 
 	result.AssertionResults = combinedResults
 	result.AllAssertionsPassed = allPassed
+	return nil
+}
+
+func requiredToolDiscoveryServers(assertionSets []*TaskAssertions) map[string]struct{} {
+	servers := make(map[string]struct{})
+	addTools := func(assertions []ToolAssertion) {
+		for _, assertion := range assertions {
+			if assertion.Tool != "" || assertion.ToolPattern != "" {
+				servers[assertion.Server] = struct{}{}
+			}
+		}
+	}
+	for _, assertions := range assertionSets {
+		if assertions == nil {
+			continue
+		}
+		addTools(assertions.ToolsUsed)
+		addTools(assertions.RequireAny)
+		addTools(assertions.ToolsNotUsed)
+		for _, assertion := range assertions.CallOrder {
+			if assertion.Type == callTypeTool {
+				servers[assertion.Server] = struct{}{}
+			}
+		}
+	}
+	return servers
 }
 
 func (r *evalRunner) evaluateSkillAssertions(

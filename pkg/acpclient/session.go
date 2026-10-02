@@ -2,6 +2,7 @@ package acpclient
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -11,7 +12,7 @@ import (
 
 type session struct {
 	mu               sync.Mutex
-	cwd              string // working directory for this session, used by ReadTextFile
+	cwd              string              // working directory for this session, used by ReadTextFile
 	updates          []acp.SessionUpdate // track all the updates in a json serializable way for future analysis
 	toolCallStatuses map[acp.ToolCallId]*acp.SessionToolCallUpdate
 	mcpServers       mcpproxy.ServerManager
@@ -43,40 +44,45 @@ func (s *session) recordPermissionToolCall(call acp.ToolCallUpdate) {
 	})
 }
 
-func (s *session) isAllowedToolCall(ctx context.Context, call acp.ToolCallUpdate) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+func (s *session) isAllowedToolCall(ctx context.Context, call acp.ToolCallUpdate) (bool, error) {
 	var title string
 	if call.Title != nil {
 		title = *call.Title
 	} else {
+		s.mu.Lock()
 		// look up the original update with the tool call id
 		curr, ok := s.toolCallStatuses[call.ToolCallId]
 		if !ok {
-			return false
+			s.mu.Unlock()
+			return false, nil
 		}
 
 		if curr.Title == nil {
-			return false
+			s.mu.Unlock()
+			return false, nil
 		}
 
 		title = *curr.Title
+		s.mu.Unlock()
 	}
 
 	for _, srv := range s.mcpServers.GetMcpServers() {
-		for _, t := range srv.GetAllowedTools(ctx) {
+		tools, err := srv.GetAllowedTools(ctx)
+		if err != nil {
+			return false, fmt.Errorf("failed to discover allowed tools for MCP server %q: %w", srv.GetName(), err)
+		}
+		for _, t := range tools {
 			if t == nil {
 				continue
 			}
 
 			if toolTitleProbablyMatches(title, t.Title, t.Name, srv.GetName()) {
-				return true
+				return true, nil
 			}
 		}
 	}
 
-	return false
+	return false, nil
 }
 
 func (s *session) update(update acp.SessionUpdate) {

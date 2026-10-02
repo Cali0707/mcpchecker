@@ -152,14 +152,16 @@ type mockServer struct {
 	allowedTools []*mcp.Tool
 }
 
-func (m *mockServer) Run(_ context.Context) error                   { return nil }
-func (m *mockServer) GetConfig() (*mcpclient.ServerConfig, error)   { return nil, nil }
-func (m *mockServer) GetName() string                               { return m.name }
-func (m *mockServer) GetAllowedTools(_ context.Context) []*mcp.Tool { return m.allowedTools }
-func (m *mockServer) GetInstructions() string                       { return "" }
-func (m *mockServer) Close() error                                  { return nil }
-func (m *mockServer) GetCallHistory() mcpproxy.CallHistory          { return mcpproxy.CallHistory{} }
-func (m *mockServer) WaitReady(_ context.Context) error             { return nil }
+func (m *mockServer) Run(_ context.Context) error                 { return nil }
+func (m *mockServer) GetConfig() (*mcpclient.ServerConfig, error) { return nil, nil }
+func (m *mockServer) GetName() string                             { return m.name }
+func (m *mockServer) GetAllowedTools(_ context.Context) ([]*mcp.Tool, error) {
+	return m.allowedTools, nil
+}
+func (m *mockServer) GetInstructions() string              { return "" }
+func (m *mockServer) Close() error                         { return nil }
+func (m *mockServer) GetCallHistory() mcpproxy.CallHistory { return mcpproxy.CallHistory{} }
+func (m *mockServer) WaitReady(_ context.Context) error    { return nil }
 
 // mockServerManager implements mcpproxy.ServerManager for testing
 type mockServerManager struct {

@@ -244,6 +244,52 @@ func TestCompositeAssertionResult_Counts(t *testing.T) {
 	}
 }
 
+func TestCompositeAssertionResult_PresenceAccounting(t *testing.T) {
+	t.Run("skips do not affect success or assertion counts", func(t *testing.T) {
+		result := &CompositeAssertionResult{
+			ToolsUsed: &SingleAssertionResult{Passed: true},
+			SkippedAssertions: []AssertionPresenceResult{
+				{Type: "toolsUsed", Server: "server", Target: "tool", Reason: "capability unavailable"},
+			},
+		}
+
+		assert.True(t, result.Succeeded())
+		assert.Equal(t, 1, result.SkippedCount())
+		assert.Equal(t, 0, result.PresenceFailureCount())
+		assert.Equal(t, 1, result.TotalAssertions())
+		assert.Equal(t, 1, result.PassedAssertions())
+		assert.Equal(t, 0, result.FailedAssertions())
+	})
+
+	t.Run("presence failures fail and count as failed assertions", func(t *testing.T) {
+		result := &CompositeAssertionResult{
+			ToolsUsed: &SingleAssertionResult{Passed: true},
+			PresenceFailures: []AssertionPresenceResult{
+				{Type: "toolsUsed", Server: "server", Target: "tool-a", Reason: "capability missing"},
+				{Type: "resourcesRead", Server: "server", Target: "resource-b", Reason: "capability missing"},
+			},
+		}
+
+		assert.False(t, result.Succeeded())
+		assert.Equal(t, 0, result.SkippedCount())
+		assert.Equal(t, 2, result.PresenceFailureCount())
+		assert.Equal(t, 2, result.TotalAssertions())
+		assert.Equal(t, 0, result.PassedAssertions())
+		assert.Equal(t, 2, result.FailedAssertions())
+	})
+}
+
+func TestCompositeAssertionResult_UnmarshalLegacyJSON(t *testing.T) {
+	var result CompositeAssertionResult
+	if err := json.Unmarshal([]byte(`{"toolsUsed":{"passed":true}}`), &result); err != nil {
+		t.Fatalf("failed to unmarshal legacy assertion result: %v", err)
+	}
+
+	assert.True(t, result.ToolsUsed.Passed)
+	assert.Empty(t, result.SkippedAssertions)
+	assert.Empty(t, result.PresenceFailures)
+}
+
 func TestToolsUsedEvaluator(t *testing.T) {
 	tt := map[string]struct {
 		assertions  []ToolAssertion
@@ -1582,6 +1628,26 @@ func TestCompositeAssertionResult_Merge(t *testing.T) {
 		assert.Equal(t, []string{"reason A"}, result.ToolsUsed.Details)
 	})
 
+	t.Run("presence records from both results are preserved", func(t *testing.T) {
+		skippedA := AssertionPresenceResult{Type: "toolsUsed", Target: "tool-a", Reason: "not available"}
+		skippedB := AssertionPresenceResult{Type: "promptsUsed", Target: "prompt-b", Reason: "not available"}
+		failureA := AssertionPresenceResult{Type: "resourcesRead", Target: "resource-a", Reason: "required"}
+		failureB := AssertionPresenceResult{Type: "resourcesRead", Target: "resource-b", Reason: "required"}
+		a := &CompositeAssertionResult{
+			SkippedAssertions: []AssertionPresenceResult{skippedA},
+			PresenceFailures:  []AssertionPresenceResult{failureA},
+		}
+		b := &CompositeAssertionResult{
+			SkippedAssertions: []AssertionPresenceResult{skippedB},
+			PresenceFailures:  []AssertionPresenceResult{failureB},
+		}
+
+		result := a.Merge(b)
+
+		assert.Equal(t, []AssertionPresenceResult{skippedA, skippedB}, result.SkippedAssertions)
+		assert.Equal(t, []AssertionPresenceResult{failureA, failureB}, result.PresenceFailures)
+	})
+
 	t.Run("all struct fields are handled by Merge", func(t *testing.T) {
 		// This test uses reflection to ensure Merge handles all fields.
 		// If a new field is added to CompositeAssertionResult, this test will fail
@@ -1595,11 +1661,16 @@ func TestCompositeAssertionResult_Merge(t *testing.T) {
 
 		for i := 0; i < typ.NumField(); i++ {
 			field := typ.Field(i)
-			if field.Type != reflect.TypeOf((*SingleAssertionResult)(nil)) {
+			switch field.Type {
+			case reflect.TypeOf((*SingleAssertionResult)(nil)):
+				aVal.Field(i).Set(reflect.ValueOf(&SingleAssertionResult{Passed: true, Reason: field.Name}))
+			case reflect.TypeOf([]AssertionPresenceResult(nil)):
+				aVal.Field(i).Set(reflect.ValueOf([]AssertionPresenceResult{{Type: field.Name, Reason: "test"}}))
+			case reflect.TypeOf((*AssertionCounts)(nil)):
+				aVal.Field(i).Set(reflect.ValueOf(&AssertionCounts{Total: 1, Passed: 1}))
+			default:
 				t.Fatalf("unexpected field type for %s: %v (Merge may need updating)", field.Name, field.Type)
 			}
-			// Set field in 'a' to a passed result
-			aVal.Field(i).Set(reflect.ValueOf(&SingleAssertionResult{Passed: true, Reason: field.Name}))
 		}
 
 		result := a.Merge(b)
@@ -1618,59 +1689,59 @@ func TestCompositeAssertionResult_Merge(t *testing.T) {
 
 func TestNewCompositeAssertionEvaluator(t *testing.T) {
 	tt := map[string]struct {
-		assertions            *TaskAssertions
+		assertions             *TaskAssertions
 		expectedEvaluatorCount int
 	}{
 		"empty assertions creates no evaluators": {
-			assertions:            &TaskAssertions{},
+			assertions:             &TaskAssertions{},
 			expectedEvaluatorCount: 0,
 		},
 		"single toolsUsed assertion": {
-			assertions:            &TaskAssertions{ToolsUsed: []ToolAssertion{{Server: "s1"}}},
+			assertions:             &TaskAssertions{ToolsUsed: []ToolAssertion{{Server: "s1"}}},
 			expectedEvaluatorCount: 1,
 		},
 		"single requireAny assertion": {
-			assertions:            &TaskAssertions{RequireAny: []ToolAssertion{{Server: "s1"}}},
+			assertions:             &TaskAssertions{RequireAny: []ToolAssertion{{Server: "s1"}}},
 			expectedEvaluatorCount: 1,
 		},
 		"single toolsNotUsed assertion": {
-			assertions:            &TaskAssertions{ToolsNotUsed: []ToolAssertion{{Server: "s1"}}},
+			assertions:             &TaskAssertions{ToolsNotUsed: []ToolAssertion{{Server: "s1"}}},
 			expectedEvaluatorCount: 1,
 		},
 		"single minToolCalls assertion": {
-			assertions:            &TaskAssertions{MinToolCalls: intPtr(1)},
+			assertions:             &TaskAssertions{MinToolCalls: intPtr(1)},
 			expectedEvaluatorCount: 1,
 		},
 		"single maxToolCalls assertion": {
-			assertions:            &TaskAssertions{MaxToolCalls: intPtr(10)},
+			assertions:             &TaskAssertions{MaxToolCalls: intPtr(10)},
 			expectedEvaluatorCount: 1,
 		},
 		"single resourcesRead assertion": {
-			assertions:            &TaskAssertions{ResourcesRead: []ResourceAssertion{{Server: "s1"}}},
+			assertions:             &TaskAssertions{ResourcesRead: []ResourceAssertion{{Server: "s1"}}},
 			expectedEvaluatorCount: 1,
 		},
 		"single resourcesNotRead assertion": {
-			assertions:            &TaskAssertions{ResourcesNotRead: []ResourceAssertion{{Server: "s1"}}},
+			assertions:             &TaskAssertions{ResourcesNotRead: []ResourceAssertion{{Server: "s1"}}},
 			expectedEvaluatorCount: 1,
 		},
 		"single promptsUsed assertion": {
-			assertions:            &TaskAssertions{PromptsUsed: []PromptAssertion{{Server: "s1"}}},
+			assertions:             &TaskAssertions{PromptsUsed: []PromptAssertion{{Server: "s1"}}},
 			expectedEvaluatorCount: 1,
 		},
 		"single promptsNotUsed assertion": {
-			assertions:            &TaskAssertions{PromptsNotUsed: []PromptAssertion{{Server: "s1"}}},
+			assertions:             &TaskAssertions{PromptsNotUsed: []PromptAssertion{{Server: "s1"}}},
 			expectedEvaluatorCount: 1,
 		},
 		"single callOrder assertion": {
-			assertions:            &TaskAssertions{CallOrder: []CallOrderAssertion{{Type: "tool", Server: "s1", Name: "t1"}}},
+			assertions:             &TaskAssertions{CallOrder: []CallOrderAssertion{{Type: "tool", Server: "s1", Name: "t1"}}},
 			expectedEvaluatorCount: 1,
 		},
 		"single noDuplicateCalls assertion": {
-			assertions:            &TaskAssertions{NoDuplicateCalls: true},
+			assertions:             &TaskAssertions{NoDuplicateCalls: true},
 			expectedEvaluatorCount: 1,
 		},
 		"noDuplicateCalls false creates no evaluator": {
-			assertions:            &TaskAssertions{NoDuplicateCalls: false},
+			assertions:             &TaskAssertions{NoDuplicateCalls: false},
 			expectedEvaluatorCount: 0,
 		},
 		"all assertion types": {

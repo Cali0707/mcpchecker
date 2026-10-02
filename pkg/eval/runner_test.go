@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"regexp"
 	"testing"
 	"time"
@@ -703,23 +704,44 @@ func TestCollectTaskConfigsDeduplication(t *testing.T) {
 	}
 }
 
+func writeTaskWithAssertions(t *testing.T) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "task.yaml")
+	content := `apiVersion: mcpchecker/v1alpha2
+kind: Task
+metadata:
+  name: assertion composition test
+spec:
+  assertions:
+    toolsUsed:
+      - server: task
+        tool: task-tool
+  prompt:
+    inline: do something
+`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
+	return path
+}
+
 func TestCollectTaskConfigsAssertionSets(t *testing.T) {
 	minCalls := 2
 	maxCalls := 10
+	taskPath := writeTaskWithAssertions(t)
 
 	runner := &evalRunner{
 		spec: &EvalSpec{
 			Config: EvalConfig{
 				TaskSets: []TaskSet{
 					{
-						Path: "../task/testdata/create-pod-inline.yaml",
+						Path: taskPath,
 						Assertions: &TaskAssertions{
 							ToolsUsed:    []ToolAssertion{{Server: "s1", Tool: "t1"}},
 							MinToolCalls: &minCalls,
 						},
 					},
 					{
-						Path: "../task/testdata/create-pod-inline.yaml",
+						Path: taskPath,
 						Assertions: &TaskAssertions{
 							ToolsUsed:        []ToolAssertion{{Server: "s2", Tool: "t2"}},
 							NoDuplicateCalls: true,
@@ -738,18 +760,58 @@ func TestCollectTaskConfigsAssertionSets(t *testing.T) {
 
 	// Assertions should be kept as separate sets, not merged
 	assertions := configs[0].assertions
-	require.Len(t, assertions, 2, "should have 2 separate assertion sets")
+	require.Len(t, assertions, 3, "should have task assertions followed by both task-set assertion sets")
 
-	// First assertion set
+	// Task-level assertions occur first and exactly once.
 	assert.Len(t, assertions[0].ToolsUsed, 1)
-	assert.Equal(t, "s1", assertions[0].ToolsUsed[0].Server)
-	assert.Equal(t, minCalls, *assertions[0].MinToolCalls)
+	assert.Equal(t, "task", assertions[0].ToolsUsed[0].Server)
+	assert.Equal(t, "task-tool", assertions[0].ToolsUsed[0].Tool)
 
-	// Second assertion set
+	// Task-set assertions follow in task-set iteration order.
 	assert.Len(t, assertions[1].ToolsUsed, 1)
-	assert.Equal(t, "s2", assertions[1].ToolsUsed[0].Server)
-	assert.True(t, assertions[1].NoDuplicateCalls)
-	assert.Equal(t, maxCalls, *assertions[1].MaxToolCalls)
+	assert.Equal(t, "s1", assertions[1].ToolsUsed[0].Server)
+	assert.Equal(t, minCalls, *assertions[1].MinToolCalls)
+
+	assert.Len(t, assertions[2].ToolsUsed, 1)
+	assert.Equal(t, "s2", assertions[2].ToolsUsed[0].Server)
+	assert.True(t, assertions[2].NoDuplicateCalls)
+	assert.Equal(t, maxCalls, *assertions[2].MaxToolCalls)
+}
+
+func TestCollectTaskConfigsTaskAssertionsOnly(t *testing.T) {
+	taskPath := writeTaskWithAssertions(t)
+	runner := &evalRunner{
+		spec: &EvalSpec{
+			Config: EvalConfig{
+				TaskSets: []TaskSet{{Path: taskPath}},
+			},
+		},
+	}
+
+	configs, err := runner.collectTaskConfigs(regexp.MustCompile(".*"))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+	require.Len(t, configs[0].assertions, 1)
+	assert.Equal(t, "task", configs[0].assertions[0].ToolsUsed[0].Server)
+}
+
+func TestCollectTaskConfigsEvalAssertionsOnly(t *testing.T) {
+	runner := &evalRunner{
+		spec: &EvalSpec{
+			Config: EvalConfig{
+				TaskSets: []TaskSet{{
+					Path:       "../task/testdata/create-pod-inline.yaml",
+					Assertions: &TaskAssertions{ToolsUsed: []ToolAssertion{{Server: "eval", Tool: "eval-tool"}}},
+				}},
+			},
+		},
+	}
+
+	configs, err := runner.collectTaskConfigs(regexp.MustCompile(".*"))
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+	require.Len(t, configs[0].assertions, 1)
+	assert.Equal(t, "eval", configs[0].assertions[0].ToolsUsed[0].Server)
 }
 
 func TestCollectTaskConfigsNilAssertions(t *testing.T) {
@@ -759,6 +821,7 @@ func TestCollectTaskConfigsNilAssertions(t *testing.T) {
 				TaskSets: []TaskSet{
 					{Path: "../task/testdata/create-pod-inline.yaml"},
 					{Path: "../task/testdata/create-pod-inline.yaml", Assertions: nil},
+					{Path: "../task/testdata/create-pod-inline.yaml", Assertions: &TaskAssertions{}},
 				},
 			},
 		},

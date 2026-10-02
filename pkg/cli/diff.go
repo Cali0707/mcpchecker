@@ -229,9 +229,15 @@ func outputTextDiff(diff DiffResult) {
 		diff.HeadStats.TasksPassed, diff.HeadStats.TasksTotal)
 	printChange(taskChange)
 
-	fmt.Printf("Assertions:  %d/%-8d %d/%-8d ",
-		diff.BaseStats.AssertionsPassed, diff.BaseStats.AssertionsTotal,
-		diff.HeadStats.AssertionsPassed, diff.HeadStats.AssertionsTotal)
+	if diff.BaseStats.AssertionsSkipped > 0 || diff.HeadStats.AssertionsSkipped > 0 {
+		fmt.Printf("Assertions:  %s %s ",
+			formatDiffAssertionCount(diff.BaseStats),
+			formatDiffAssertionCount(diff.HeadStats))
+	} else {
+		fmt.Printf("Assertions:  %d/%-8d %d/%-8d ",
+			diff.BaseStats.AssertionsPassed, diff.BaseStats.AssertionsTotal,
+			diff.HeadStats.AssertionsPassed, diff.HeadStats.AssertionsTotal)
+	}
 	printChange(assertionChange)
 
 	// Token stats (only show if at least one side has actual token data)
@@ -344,10 +350,17 @@ func outputMarkdownDiff(diff DiffResult) {
 		diff.BaseStats.TasksPassed, diff.BaseStats.TasksTotal, diff.BaseStats.TaskPassRate*100,
 		diff.HeadStats.TasksPassed, diff.HeadStats.TasksTotal, diff.HeadStats.TaskPassRate*100,
 		formatChangeMarkdown(taskChange))
-	fmt.Printf("| Assertions | %d/%d (%.1f%%) | %d/%d (%.1f%%) | %s |\n",
-		diff.BaseStats.AssertionsPassed, diff.BaseStats.AssertionsTotal, diff.BaseStats.AssertionPassRate*100,
-		diff.HeadStats.AssertionsPassed, diff.HeadStats.AssertionsTotal, diff.HeadStats.AssertionPassRate*100,
-		formatChangeMarkdown(assertionChange))
+	if diff.BaseStats.AssertionsSkipped > 0 || diff.HeadStats.AssertionsSkipped > 0 {
+		fmt.Printf("| Assertions | %s | %s | %s |\n",
+			formatDiffAssertionRate(diff.BaseStats),
+			formatDiffAssertionRate(diff.HeadStats),
+			formatChangeMarkdown(assertionChange))
+	} else {
+		fmt.Printf("| Assertions | %d/%d (%.1f%%) | %d/%d (%.1f%%) | %s |\n",
+			diff.BaseStats.AssertionsPassed, diff.BaseStats.AssertionsTotal, diff.BaseStats.AssertionPassRate*100,
+			diff.HeadStats.AssertionsPassed, diff.HeadStats.AssertionsTotal, diff.HeadStats.AssertionPassRate*100,
+			formatChangeMarkdown(assertionChange))
+	}
 
 	// Token stats (only show if at least one side has token data)
 	if diff.BaseStats.TasksWithTokens > 0 || diff.HeadStats.TasksWithTokens > 0 {
@@ -407,6 +420,16 @@ func outputMarkdownDiff(diff DiffResult) {
 			fmt.Printf("- `%s`\n", r.TaskName)
 		}
 	}
+}
+
+func formatDiffAssertionCount(stats results.Stats) string {
+	value := fmt.Sprintf("%d/%-8d", stats.AssertionsPassed, stats.AssertionsTotal)
+	value += fmt.Sprintf(" (%d skipped)", stats.AssertionsSkipped)
+	return value
+}
+
+func formatDiffAssertionRate(stats results.Stats) string {
+	return fmt.Sprintf("%d/%d (%d skipped, %.1f%%)", stats.AssertionsPassed, stats.AssertionsTotal, stats.AssertionsSkipped, stats.AssertionPassRate*100)
 }
 
 func formatChangeMarkdown(change float64) string {

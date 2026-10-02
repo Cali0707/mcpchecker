@@ -300,17 +300,51 @@ func TestLoadBackwardCompat(t *testing.T) {
 
 func TestCollectFailedAssertions(t *testing.T) {
 	assertionResults := &eval.CompositeAssertionResult{
-		ToolsUsed:    &eval.SingleAssertionResult{Passed: false, Reason: "Tool not called"},
-		MinToolCalls: &eval.SingleAssertionResult{Passed: true},
+		ToolsUsed:        &eval.SingleAssertionResult{Passed: false, Reason: "Tool not called"},
+		MinToolCalls:     &eval.SingleAssertionResult{Passed: true},
+		PresenceFailures: []eval.AssertionPresenceResult{{Type: "toolsUsed", Server: "kubernetes", Target: "pods_create", Reason: "tool not present"}},
 	}
 
 	failures := CollectFailedAssertions(assertionResults)
 
-	if len(failures) != 1 {
-		t.Errorf("len(failures) = %d, want 1", len(failures))
+	if len(failures) != 2 {
+		t.Errorf("len(failures) = %d, want 2", len(failures))
 	}
 
 	if len(failures) > 0 && failures[0] != "ToolsUsed: Tool not called" {
 		t.Errorf("failures[0] = %s, want 'ToolsUsed: Tool not called'", failures[0])
+	}
+	if len(failures) > 1 && failures[1] != "Presence failure: toolsUsed kubernetes/pods_create: tool not present" {
+		t.Errorf("failures[1] = %s, want 'Presence failure: toolsUsed kubernetes/pods_create: tool not present'", failures[1])
+	}
+}
+
+func TestParseOutputAssertionPresenceRoundTrip(t *testing.T) {
+	want := &eval.EvalOutput{Results: []*eval.EvalResult{{
+		TaskName: "presence-results",
+		AssertionResults: &eval.CompositeAssertionResult{
+			SkippedAssertions: []eval.AssertionPresenceResult{{Type: "toolsUsed", Server: "kubernetes", Target: "pods_create", Reason: "tool not present"}},
+			PresenceFailures:  []eval.AssertionPresenceResult{{Type: "toolsNotUsed", Server: "kubernetes", Reason: "server not present"}},
+		},
+	}}}
+
+	data, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("failed to marshal results: %v", err)
+	}
+
+	got, err := ParseOutput(data)
+	if err != nil {
+		t.Fatalf("ParseOutput failed: %v", err)
+	}
+	if len(got.Results) != 1 {
+		t.Fatalf("got %d results, want 1", len(got.Results))
+	}
+	assertions := got.Results[0].AssertionResults
+	if len(assertions.SkippedAssertions) != 1 || assertions.SkippedAssertions[0] != want.Results[0].AssertionResults.SkippedAssertions[0] {
+		t.Errorf("SkippedAssertions = %#v, want %#v", assertions.SkippedAssertions, want.Results[0].AssertionResults.SkippedAssertions)
+	}
+	if len(assertions.PresenceFailures) != 1 || assertions.PresenceFailures[0] != want.Results[0].AssertionResults.PresenceFailures[0] {
+		t.Errorf("PresenceFailures = %#v, want %#v", assertions.PresenceFailures, want.Results[0].AssertionResults.PresenceFailures)
 	}
 }

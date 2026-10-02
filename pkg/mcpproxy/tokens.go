@@ -129,7 +129,11 @@ func ComputeSchemaTokens(ctx context.Context, servers []Server) (int64, error) {
 		}
 
 		// Count tool definitions (name + description + inputSchema)
-		for _, tool := range srv.GetAllowedTools(ctx) {
+		tools, err := srv.GetAllowedTools(ctx)
+		if err != nil {
+			return total, fmt.Errorf("failed to discover allowed tools for MCP server %q: %w", srv.GetName(), err)
+		}
+		for _, tool := range tools {
 			// Count name + description together
 			text := tool.Name
 			if tool.Description != "" {

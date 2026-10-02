@@ -54,11 +54,11 @@ func Connect(ctx context.Context, cfg *ServerConfig) (*Client, error) {
 	}, nil
 }
 
-func (c *Client) GetAllowedTools(ctx context.Context) []*mcp.Tool {
+func (c *Client) GetAllowedTools(ctx context.Context) ([]*mcp.Tool, error) {
 	allowed := []*mcp.Tool{}
 	for t, err := range c.Tools(ctx, &mcp.ListToolsParams{}) {
 		if err != nil {
-			continue
+			return nil, err
 		}
 
 		if c.cfg.EnableAllTools {
@@ -68,7 +68,7 @@ func (c *Client) GetAllowedTools(ctx context.Context) []*mcp.Tool {
 		}
 	}
 
-	return allowed
+	return allowed, nil
 }
 
 func (c *Client) GetConfig() *ServerConfig {

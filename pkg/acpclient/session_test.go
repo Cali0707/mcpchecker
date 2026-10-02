@@ -2,6 +2,7 @@ package acpclient
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/coder/acp-go-sdk"
@@ -15,16 +16,19 @@ import (
 type mockServer struct {
 	name         string
 	allowedTools []*mcp.Tool
+	toolsErr     error
 }
 
-func (m *mockServer) Run(_ context.Context) error                   { return nil }
-func (m *mockServer) GetConfig() (*mcpclient.ServerConfig, error)   { return nil, nil }
-func (m *mockServer) GetName() string                               { return m.name }
-func (m *mockServer) GetAllowedTools(_ context.Context) []*mcp.Tool { return m.allowedTools }
-func (m *mockServer) GetInstructions() string                       { return "" }
-func (m *mockServer) Close() error                                  { return nil }
-func (m *mockServer) GetCallHistory() mcpproxy.CallHistory          { return mcpproxy.CallHistory{} }
-func (m *mockServer) WaitReady(_ context.Context) error             { return nil }
+func (m *mockServer) Run(_ context.Context) error                 { return nil }
+func (m *mockServer) GetConfig() (*mcpclient.ServerConfig, error) { return nil, nil }
+func (m *mockServer) GetName() string                             { return m.name }
+func (m *mockServer) GetAllowedTools(_ context.Context) ([]*mcp.Tool, error) {
+	return m.allowedTools, m.toolsErr
+}
+func (m *mockServer) GetInstructions() string              { return "" }
+func (m *mockServer) Close() error                         { return nil }
+func (m *mockServer) GetCallHistory() mcpproxy.CallHistory { return mcpproxy.CallHistory{} }
+func (m *mockServer) WaitReady(_ context.Context) error    { return nil }
 
 // mockServerManager implements mcpproxy.ServerManager for testing
 type mockServerManager struct {
@@ -89,7 +93,8 @@ func TestSession_IsAllowedToolCall(t *testing.T) {
 			}
 			s := NewSession(mgr, "")
 
-			result := s.isAllowedToolCall(context.Background(), tc.call)
+			result, err := s.isAllowedToolCall(context.Background(), tc.call)
+			assert.NoError(t, err)
 			assert.Equal(t, tc.expected, result)
 		})
 	}
@@ -116,8 +121,25 @@ func TestSession_IsAllowedToolCall_WithPriorUpdate(t *testing.T) {
 		Title:      nil,
 	}
 
-	result := s.isAllowedToolCall(context.Background(), call)
+	result, err := s.isAllowedToolCall(context.Background(), call)
+	assert.NoError(t, err)
 	assert.True(t, result)
+}
+
+func TestSession_IsAllowedToolCall_PropagatesToolDiscoveryError(t *testing.T) {
+	mgr := &mockServerManager{
+		servers: []mcpproxy.Server{
+			&mockServer{name: "broken-server", toolsErr: errors.New("list tools failed")},
+		},
+	}
+	s := NewSession(mgr, "")
+
+	allowed, err := s.isAllowedToolCall(context.Background(), acp.ToolCallUpdate{
+		ToolCallId: "call-1",
+		Title:      ptr("Read File"),
+	})
+	assert.False(t, allowed)
+	assert.ErrorContains(t, err, "broken-server")
 }
 
 func TestSession_ToolCallStatusUpdateLocked(t *testing.T) {
@@ -313,7 +335,8 @@ func TestSession_IsAllowedToolCall_FuzzyMatching(t *testing.T) {
 				Title:      ptr(tc.callTitle),
 			}
 
-			result := s.isAllowedToolCall(context.Background(), call)
+			result, err := s.isAllowedToolCall(context.Background(), call)
+			assert.NoError(t, err)
 			assert.Equal(t, tc.expected, result)
 		})
 	}

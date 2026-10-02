@@ -19,6 +19,7 @@ type SummaryOutput struct {
 	TaskPassRate           float64       `json:"taskPassRate"`
 	AssertionsTotal        int           `json:"assertionsTotal"`
 	AssertionsPassed       int           `json:"assertionsPassed"`
+	AssertionsSkipped      int           `json:"assertionsSkipped,omitempty"`
 	AssertionPassRate      float64       `json:"assertionPassRate"`
 	TotalTokensEstimate    int64         `json:"totalTokensEstimate"`
 	TotalMcpSchemaTokens   int64         `json:"totalMcpSchemaTokens"`
@@ -29,18 +30,20 @@ type SummaryOutput struct {
 }
 
 type TaskSummary struct {
-	Name              string   `json:"name"`
-	TaskPassed        bool     `json:"taskPassed"`
-	AssertionsPassed  bool     `json:"assertionsPassed"`
-	TaskError         string   `json:"taskError,omitempty"`
-	FailedAssertions  []string `json:"failedAssertions,omitempty"`
-	TokensEstimated   int64    `json:"tokensEstimated,omitempty"`
-	McpSchemaTokens   int64    `json:"mcpSchemaTokens,omitempty"`
-	TokenError        string   `json:"tokenError,omitempty"`
-	AgentInputTokens  int64    `json:"agentInputTokens"`
-	AgentOutputTokens int64    `json:"agentOutputTokens"`
-	JudgeInputTokens  int64    `json:"judgeInputTokens"`
-	JudgeOutputTokens int64    `json:"judgeOutputTokens"`
+	Name              string                         `json:"name"`
+	TaskPassed        bool                           `json:"taskPassed"`
+	AssertionsPassed  bool                           `json:"assertionsPassed"`
+	TaskError         string                         `json:"taskError,omitempty"`
+	FailedAssertions  []string                       `json:"failedAssertions,omitempty"`
+	SkippedAssertions []eval.AssertionPresenceResult `json:"skippedAssertions,omitempty"`
+	PresenceFailures  []eval.AssertionPresenceResult `json:"presenceFailures,omitempty"`
+	TokensEstimated   int64                          `json:"tokensEstimated,omitempty"`
+	McpSchemaTokens   int64                          `json:"mcpSchemaTokens,omitempty"`
+	TokenError        string                         `json:"tokenError,omitempty"`
+	AgentInputTokens  int64                          `json:"agentInputTokens"`
+	AgentOutputTokens int64                          `json:"agentOutputTokens"`
+	JudgeInputTokens  int64                          `json:"judgeInputTokens"`
+	JudgeOutputTokens int64                          `json:"judgeOutputTokens"`
 }
 
 func NewSummaryCmd() *cobra.Command {
@@ -129,6 +132,9 @@ func buildSummaryOutput(resultsFile string, evalResults []*eval.EvalResult) Summ
 		if result.AssertionResults != nil {
 			summary.AssertionsTotal += result.AssertionResults.TotalAssertions()
 			summary.AssertionsPassed += result.AssertionResults.PassedAssertions()
+			summary.AssertionsSkipped += result.AssertionResults.SkippedCount()
+			taskSummary.SkippedAssertions = result.AssertionResults.SkippedAssertions
+			taskSummary.PresenceFailures = result.AssertionResults.PresenceFailures
 
 			if !result.AllAssertionsPassed {
 				taskSummary.FailedAssertions = results.CollectFailedAssertions(result.AssertionResults)
@@ -192,10 +198,11 @@ func outputTextSummary(evalResults []*eval.EvalResult, summary SummaryOutput) {
 		passed := result.TaskPassed && result.AllAssertionsPassed
 
 		// Count task assertions
-		var taskAssertionsPassed, taskAssertionsTotal int
+		var taskAssertionsPassed, taskAssertionsTotal, taskAssertionsSkipped int
 		if result.AssertionResults != nil {
 			taskAssertionsPassed = result.AssertionResults.PassedAssertions()
 			taskAssertionsTotal = result.AssertionResults.TotalAssertions()
+			taskAssertionsSkipped = result.AssertionResults.SkippedCount()
 		}
 
 		// Print task line
@@ -208,14 +215,21 @@ func outputTextSummary(evalResults []*eval.EvalResult, summary SummaryOutput) {
 		}
 
 		// Print assertion count if any
-		if taskAssertionsTotal > 0 {
-			fmt.Printf(" (assertions: %d/%d)", taskAssertionsPassed, taskAssertionsTotal)
+		if taskAssertionsTotal > 0 || taskAssertionsSkipped > 0 {
+			if taskAssertionsSkipped > 0 {
+				fmt.Printf(" (assertions: %d/%d, %d skipped)", taskAssertionsPassed, taskAssertionsTotal, taskAssertionsSkipped)
+			} else {
+				fmt.Printf(" (assertions: %d/%d)", taskAssertionsPassed, taskAssertionsTotal)
+			}
 		}
 		fmt.Println()
 
 		// Print failure details
 		if taskSummary.TaskError != "" {
 			fmt.Printf("      %s\n", taskSummary.TaskError)
+		}
+		for _, skippedAssertion := range taskSummary.SkippedAssertions {
+			fmt.Printf("      %s\n", formatPresenceAssertion("SKIP", skippedAssertion))
 		}
 
 		// Print failed assertions
@@ -228,8 +242,13 @@ func outputTextSummary(evalResults []*eval.EvalResult, summary SummaryOutput) {
 	fmt.Println()
 	fmt.Printf("Tasks:      %d/%d passed (%.2f%%)\n",
 		summary.TasksPassed, summary.TasksTotal, summary.TaskPassRate*100)
-	fmt.Printf("Assertions: %d/%d passed (%.2f%%)\n",
-		summary.AssertionsPassed, summary.AssertionsTotal, summary.AssertionPassRate*100)
+	if summary.AssertionsSkipped > 0 {
+		fmt.Printf("Assertions: %d/%d passed (%.2f%%, %d skipped)\n",
+			summary.AssertionsPassed, summary.AssertionsTotal, summary.AssertionPassRate*100, summary.AssertionsSkipped)
+	} else {
+		fmt.Printf("Assertions: %d/%d passed (%.2f%%)\n",
+			summary.AssertionsPassed, summary.AssertionsTotal, summary.AssertionPassRate*100)
+	}
 	// Check if any task had token errors
 	hasTokenErrors := false
 	for _, task := range summary.Tasks {
@@ -282,6 +301,7 @@ func outputGitHubSummary(summary SummaryOutput) {
 	fmt.Printf("task-pass-rate=%.4f\n", summary.TaskPassRate)
 	fmt.Printf("assertions-total=%d\n", summary.AssertionsTotal)
 	fmt.Printf("assertions-passed=%d\n", summary.AssertionsPassed)
+	fmt.Printf("assertions-skipped=%d\n", summary.AssertionsSkipped)
 	fmt.Printf("assertion-pass-rate=%.4f\n", summary.AssertionPassRate)
 	fmt.Printf("tokens-estimated=%d\n", summary.TotalTokensEstimate)
 	fmt.Printf("mcp-schema-tokens=%d\n", summary.TotalMcpSchemaTokens)

@@ -24,12 +24,33 @@ const (
 	assertionTypePromptsNotUsed   = "promptsNotUsed"
 	assertionTypeCallOrder        = "callOrder"
 	assertionTypeNoDuplicateCalls = "noDuplicateCalls"
+	assertionTypeSkillsLoaded     = "skillsLoaded"
+	assertionTypeSkillsNotLoaded  = "skillsNotLoaded"
+
+	callTypeTool     = "tool"
+	callTypeResource = "resource"
+	callTypePrompt   = "prompt"
 )
 
 type SingleAssertionResult struct {
 	Passed  bool     `json:"passed"`
 	Reason  string   `json:"reason,omitempty"`
 	Details []string `json:"details,omitempty"`
+}
+
+// AssertionPresenceResult records a configured assertion that was skipped or failed a presence check.
+type AssertionPresenceResult struct {
+	Type   string `json:"type"`
+	Server string `json:"server,omitempty"`
+	Target string `json:"target,omitempty"`
+	Reason string `json:"reason"`
+}
+
+// AssertionCounts preserves totals when independently evaluated assertion sets
+// are merged into the category-oriented result shape.
+type AssertionCounts struct {
+	Total  int `json:"total"`
+	Passed int `json:"passed"`
 }
 
 func (s *SingleAssertionResult) Succeeded() bool {
@@ -41,19 +62,22 @@ func (s *SingleAssertionResult) Succeeded() bool {
 }
 
 type CompositeAssertionResult struct {
-	ToolsUsed        *SingleAssertionResult `json:"toolsUsed,omitempty"`
-	RequireAny       *SingleAssertionResult `json:"requireAny,omitempty"`
-	ToolsNotUsed     *SingleAssertionResult `json:"toolsNotUsed,omitempty"`
-	MinToolCalls     *SingleAssertionResult `json:"minToolCalls,omitempty"`
-	MaxToolCalls     *SingleAssertionResult `json:"maxToolCalls,omitempty"`
-	ResourcesRead    *SingleAssertionResult `json:"resourcesRead,omitempty"`
-	ResourcesNotRead *SingleAssertionResult `json:"resourcesNotRead,omitempty"`
-	PromptsUsed      *SingleAssertionResult `json:"promptsUsed,omitempty"`
-	PromptsNotUsed   *SingleAssertionResult `json:"promptsNotUsed,omitempty"`
-	CallOrder        *SingleAssertionResult `json:"callOrder,omitempty"`
-	NoDuplicateCalls *SingleAssertionResult `json:"noDuplicateCalls,omitempty"`
-	SkillsLoaded     *SingleAssertionResult `json:"skillsLoaded,omitempty"`
-	SkillsNotLoaded  *SingleAssertionResult `json:"skillsNotLoaded,omitempty"`
+	ToolsUsed         *SingleAssertionResult    `json:"toolsUsed,omitempty"`
+	RequireAny        *SingleAssertionResult    `json:"requireAny,omitempty"`
+	ToolsNotUsed      *SingleAssertionResult    `json:"toolsNotUsed,omitempty"`
+	MinToolCalls      *SingleAssertionResult    `json:"minToolCalls,omitempty"`
+	MaxToolCalls      *SingleAssertionResult    `json:"maxToolCalls,omitempty"`
+	ResourcesRead     *SingleAssertionResult    `json:"resourcesRead,omitempty"`
+	ResourcesNotRead  *SingleAssertionResult    `json:"resourcesNotRead,omitempty"`
+	PromptsUsed       *SingleAssertionResult    `json:"promptsUsed,omitempty"`
+	PromptsNotUsed    *SingleAssertionResult    `json:"promptsNotUsed,omitempty"`
+	CallOrder         *SingleAssertionResult    `json:"callOrder,omitempty"`
+	NoDuplicateCalls  *SingleAssertionResult    `json:"noDuplicateCalls,omitempty"`
+	SkillsLoaded      *SingleAssertionResult    `json:"skillsLoaded,omitempty"`
+	SkillsNotLoaded   *SingleAssertionResult    `json:"skillsNotLoaded,omitempty"`
+	SkippedAssertions []AssertionPresenceResult `json:"skippedAssertions,omitempty"`
+	PresenceFailures  []AssertionPresenceResult `json:"presenceFailures,omitempty"`
+	Counts            *AssertionCounts          `json:"counts,omitempty"`
 }
 
 // allFields returns all assertion result pointers for iteration.
@@ -69,6 +93,10 @@ func (c *CompositeAssertionResult) allFields() []*SingleAssertionResult {
 }
 
 func (c *CompositeAssertionResult) Succeeded() bool {
+	if len(c.PresenceFailures) > 0 {
+		return false
+	}
+
 	for _, f := range c.allFields() {
 		if !f.Succeeded() {
 			return false
@@ -77,31 +105,72 @@ func (c *CompositeAssertionResult) Succeeded() bool {
 	return true
 }
 
-// TotalAssertions returns the total number of individual assertions that were evaluated
+// TotalAssertions returns independently evaluated assertion categories; skipped assertions are excluded.
 func (c *CompositeAssertionResult) TotalAssertions() int {
-	count := 0
-	for _, f := range c.allFields() {
-		if f != nil {
-			count++
-		}
+	if c.Counts != nil {
+		return c.Counts.Total
 	}
-	return count
+	return c.derivedCounts().Total
 }
 
-// PassedAssertions returns the number of individual assertions that passed
+// SkippedCount returns the number of configured assertions that were skipped.
+func (c *CompositeAssertionResult) SkippedCount() int {
+	return len(c.SkippedAssertions)
+}
+
+// PresenceFailureCount returns the number of strict assertion presence failures.
+func (c *CompositeAssertionResult) PresenceFailureCount() int {
+	return len(c.PresenceFailures)
+}
+
+// PassedAssertions returns the number of independently evaluated assertion categories that passed.
 func (c *CompositeAssertionResult) PassedAssertions() int {
-	count := 0
-	for _, f := range c.allFields() {
-		if f != nil && f.Succeeded() {
-			count++
-		}
+	if c.Counts != nil {
+		return c.Counts.Passed
 	}
-	return count
+	return c.derivedCounts().Passed
 }
 
 // FailedAssertions returns the number of individual assertions that failed
 func (c *CompositeAssertionResult) FailedAssertions() int {
 	return c.TotalAssertions() - c.PassedAssertions()
+}
+
+func (c *CompositeAssertionResult) derivedCounts() AssertionCounts {
+	fields := map[string]*SingleAssertionResult{
+		assertionTypeToolsUsed:        c.ToolsUsed,
+		assertionTypeRequireAny:       c.RequireAny,
+		assertionTypeToolsNotUsed:     c.ToolsNotUsed,
+		assertionTypeMinToolCalls:     c.MinToolCalls,
+		assertionTypeMaxToolCalls:     c.MaxToolCalls,
+		assertionTypeResourcesRead:    c.ResourcesRead,
+		assertionTypeResourcesNotRead: c.ResourcesNotRead,
+		assertionTypePromptsUsed:      c.PromptsUsed,
+		assertionTypePromptsNotUsed:   c.PromptsNotUsed,
+		assertionTypeCallOrder:        c.CallOrder,
+		assertionTypeNoDuplicateCalls: c.NoDuplicateCalls,
+		assertionTypeSkillsLoaded:     c.SkillsLoaded,
+		assertionTypeSkillsNotLoaded:  c.SkillsNotLoaded,
+	}
+	failedPresenceTypes := make(map[string]struct{}, len(c.PresenceFailures))
+	for _, failure := range c.PresenceFailures {
+		failedPresenceTypes[failure.Type] = struct{}{}
+	}
+
+	counts := AssertionCounts{}
+	for assertionType, result := range fields {
+		_, presenceFailed := failedPresenceTypes[assertionType]
+		if result == nil && !presenceFailed {
+			continue
+		}
+		counts.Total++
+		if result != nil && result.Succeeded() && !presenceFailed {
+			counts.Passed++
+		}
+		delete(failedPresenceTypes, assertionType)
+	}
+	counts.Total += len(failedPresenceTypes)
+	return counts
 }
 
 type CompositeAssertionEvaluator interface {
@@ -518,7 +587,7 @@ func (e *callOrderEvaluator) Evaluate(history *mcpproxy.CallHistory) *SingleAsse
 	for _, tc := range history.ToolCalls {
 		allCalls = append(allCalls, indexedCall{
 			timestamp: tc.Timestamp,
-			callType:  "tool",
+			callType:  callTypeTool,
 			server:    tc.ServerName,
 			name:      tc.ToolName,
 		})
@@ -527,7 +596,7 @@ func (e *callOrderEvaluator) Evaluate(history *mcpproxy.CallHistory) *SingleAsse
 	for _, rr := range history.ResourceReads {
 		allCalls = append(allCalls, indexedCall{
 			timestamp: rr.Timestamp,
-			callType:  "resource",
+			callType:  callTypeResource,
 			server:    rr.ServerName,
 			name:      rr.URI,
 		})
@@ -536,7 +605,7 @@ func (e *callOrderEvaluator) Evaluate(history *mcpproxy.CallHistory) *SingleAsse
 	for _, pg := range history.PromptGets {
 		allCalls = append(allCalls, indexedCall{
 			timestamp: pg.Timestamp,
-			callType:  "prompt",
+			callType:  callTypePrompt,
 			server:    pg.ServerName,
 			name:      pg.Name,
 		})
@@ -607,7 +676,11 @@ func matchesToolAssertion(call *mcpproxy.ToolCall, assertion ToolAssertion) bool
 		return false
 	}
 
-	if call.ServerName != assertion.Server {
+	return matchesToolName(call.ServerName, call.ToolName, assertion)
+}
+
+func matchesToolName(serverName, toolName string, assertion ToolAssertion) bool {
+	if serverName != assertion.Server {
 		return false
 	}
 
@@ -616,12 +689,12 @@ func matchesToolAssertion(call *mcpproxy.ToolCall, assertion ToolAssertion) bool
 		return true
 	}
 
-	if assertion.Tool != "" && call.ToolName == assertion.Tool {
+	if assertion.Tool != "" && toolName == assertion.Tool {
 		return true
 	}
 
 	if assertion.ToolPattern != "" {
-		matched, _ := regexp.MatchString(assertion.ToolPattern, call.ToolName)
+		matched, _ := regexp.MatchString(assertion.ToolPattern, toolName)
 		return matched
 	}
 
@@ -725,20 +798,27 @@ func (c *CompositeAssertionResult) Merge(other *CompositeAssertionResult) *Compo
 		return x
 	}
 
+	counts := &AssertionCounts{
+		Total:  c.TotalAssertions() + other.TotalAssertions(),
+		Passed: c.PassedAssertions() + other.PassedAssertions(),
+	}
 	return &CompositeAssertionResult{
-		ToolsUsed:        mergeField(c.ToolsUsed, other.ToolsUsed),
-		RequireAny:       mergeField(c.RequireAny, other.RequireAny),
-		ToolsNotUsed:     mergeField(c.ToolsNotUsed, other.ToolsNotUsed),
-		MinToolCalls:     mergeField(c.MinToolCalls, other.MinToolCalls),
-		MaxToolCalls:     mergeField(c.MaxToolCalls, other.MaxToolCalls),
-		ResourcesRead:    mergeField(c.ResourcesRead, other.ResourcesRead),
-		ResourcesNotRead: mergeField(c.ResourcesNotRead, other.ResourcesNotRead),
-		PromptsUsed:      mergeField(c.PromptsUsed, other.PromptsUsed),
-		PromptsNotUsed:   mergeField(c.PromptsNotUsed, other.PromptsNotUsed),
-		CallOrder:        mergeField(c.CallOrder, other.CallOrder),
-		NoDuplicateCalls: mergeField(c.NoDuplicateCalls, other.NoDuplicateCalls),
-		SkillsLoaded:     mergeField(c.SkillsLoaded, other.SkillsLoaded),
-		SkillsNotLoaded:  mergeField(c.SkillsNotLoaded, other.SkillsNotLoaded),
+		ToolsUsed:         mergeField(c.ToolsUsed, other.ToolsUsed),
+		RequireAny:        mergeField(c.RequireAny, other.RequireAny),
+		ToolsNotUsed:      mergeField(c.ToolsNotUsed, other.ToolsNotUsed),
+		MinToolCalls:      mergeField(c.MinToolCalls, other.MinToolCalls),
+		MaxToolCalls:      mergeField(c.MaxToolCalls, other.MaxToolCalls),
+		ResourcesRead:     mergeField(c.ResourcesRead, other.ResourcesRead),
+		ResourcesNotRead:  mergeField(c.ResourcesNotRead, other.ResourcesNotRead),
+		PromptsUsed:       mergeField(c.PromptsUsed, other.PromptsUsed),
+		PromptsNotUsed:    mergeField(c.PromptsNotUsed, other.PromptsNotUsed),
+		CallOrder:         mergeField(c.CallOrder, other.CallOrder),
+		NoDuplicateCalls:  mergeField(c.NoDuplicateCalls, other.NoDuplicateCalls),
+		SkillsLoaded:      mergeField(c.SkillsLoaded, other.SkillsLoaded),
+		SkillsNotLoaded:   mergeField(c.SkillsNotLoaded, other.SkillsNotLoaded),
+		SkippedAssertions: append(append([]AssertionPresenceResult(nil), c.SkippedAssertions...), other.SkippedAssertions...),
+		PresenceFailures:  append(append([]AssertionPresenceResult(nil), c.PresenceFailures...), other.PresenceFailures...),
+		Counts:            counts,
 	}
 }
 
