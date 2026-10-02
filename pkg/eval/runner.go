@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -386,14 +387,15 @@ func (r *evalRunner) buildSummary(
 				if c, ok := mcpManager.Get(name); ok {
 					tools, err := c.GetAllowedTools(ctx)
 					if err != nil {
-						return nil, fmt.Errorf("failed to discover allowed tools for MCP server %q: %w", name, err)
-					}
-					for _, tool := range tools {
-						serverSummary.Tools = append(serverSummary.Tools, ToolSummary{
-							Name:        tool.Name,
-							Description: tool.Description,
-							InputSchema: tool.InputSchema,
-						})
+						fmt.Fprintf(os.Stderr, "Warning: failed to discover allowed tools for MCP server %q while building summary: %v\n", name, err)
+					} else {
+						for _, tool := range tools {
+							serverSummary.Tools = append(serverSummary.Tools, ToolSummary{
+								Name:        tool.Name,
+								Description: tool.Description,
+								InputSchema: tool.InputSchema,
+							})
+						}
 					}
 				}
 			}
